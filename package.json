@@ -1,9 +1,0 @@
-{
-  "name": "invetario-219-root",
-  "private": true,
-  "scripts": {
-    "dev": "npm --prefix trueno-inventario-219 run dev",
-    "build": "npm --prefix trueno-inventario-219 run build && node -e \"require('fs').cpSync('trueno-inventario-219/dist', 'dist', {recursive: true})\"",
-    "preview": "npm --prefix trueno-inventario-219 run preview"
-  }
-}
