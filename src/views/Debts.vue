@@ -1,9 +1,9 @@
-<template>
+﻿<template>
   <div class="page-container">
     <div class="page-header">
       <div>
         <h1 class="page-title"><Wallet :size="24" /> Deudas</h1>
-        <p class="page-subtitle">Gestión de créditos y cobros pendientes</p>
+        <p class="page-subtitle">Gestión de créditos y cobros pendientes, agrupados por cliente</p>
       </div>
     </div>
 
@@ -12,17 +12,17 @@
       <div class="stat-card">
         <div class="stat-icon"><ClipboardList :size="26" /></div>
         <div class="stat-value">{{ store.debts.length }}</div>
-        <div class="stat-label">Total Deudas</div>
+        <div class="stat-label">Total Ventas a Crédito</div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon"><Clock :size="26" /></div>
-        <div class="stat-value text-warning">{{ pendingDebts.length }}</div>
-        <div class="stat-label">Pendientes</div>
+        <div class="stat-icon"><Users :size="26" /></div>
+        <div class="stat-value text-warning">{{ clientsWithDebtCount }}</div>
+        <div class="stat-label">Clientes con Deuda</div>
       </div>
       <div class="stat-card">
         <div class="stat-icon"><AlertOctagon :size="26" /></div>
-        <div class="stat-value text-danger">{{ overdueDebts.length }}</div>
-        <div class="stat-label">Vencidas</div>
+        <div class="stat-value text-danger">{{ overdueGroupsCount }}</div>
+        <div class="stat-label">Clientes con Vencidas</div>
       </div>
       <div class="stat-card">
         <div class="stat-icon"><BadgeDollarSign :size="26" /></div>
@@ -35,18 +35,18 @@
     <div class="filter-row">
       <div class="search-bar">
         <Search :size="16" class="search-icon" />
-        <input v-model="searchQuery" placeholder="Buscar por cliente..." />
+        <input v-model="searchQuery" placeholder="Buscar por cliente o ID..." />
       </div>
       <select class="form-control filter-select" v-model="filterStatus">
         <option value="">Todos los estados</option>
         <option value="pendiente">Pendiente</option>
-        <option value="vencida">Vencida</option>
-        <option value="pagada">Pagada</option>
+        <option value="vencida">Con Vencidas</option>
+        <option value="pagada">Saldados</option>
       </select>
     </div>
 
-    <!-- Debts List -->
-    <div v-if="filteredDebts.length === 0" class="card">
+    <!-- Debts List agrupado por cliente -->
+    <div v-if="filteredGroups.length === 0" class="card">
       <div class="empty-state">
         <div class="empty-state-icon"><Wallet :size="40" /></div>
         <div class="empty-state-text">No hay deudas registradas</div>
@@ -54,83 +54,120 @@
     </div>
 
     <div class="debts-list">
-      <div v-for="debt in filteredDebts" :key="debt.id" class="debt-card card">
+      <div v-for="group in filteredGroups" :key="group.key" class="debt-card card">
         <div class="debt-header">
           <div class="debt-client-info">
-            <div class="debt-avatar">{{ initials(debt.clientName) }}</div>
+            <div class="debt-avatar">{{ initials(group.clientName) }}</div>
             <div>
-              <div class="debt-client-name">{{ debt.clientName }}</div>
-              <div class="text-muted debt-meta">Venta #{{ debt.saleId }} — {{ formatDateShort(debt.createdAt) }}</div>
+              <div class="debt-client-name">
+                {{ group.clientName }}
+                <span v-if="group.clientId" class="client-id-tag">ID: {{ group.clientId }}</span>
+              </div>
+              <div class="text-muted debt-meta">
+                {{ group.debts.length }} venta{{ group.debts.length === 1 ? '' : 's' }} a crédito
+              </div>
             </div>
           </div>
           <div class="debt-status-area">
-            <span :class="['badge', getDebtStatus(debt).badge]">{{ getDebtStatus(debt).label }}</span>
+            <span :class="['badge', getGroupStatus(group).badge]">{{ getGroupStatus(group).label }}</span>
           </div>
         </div>
 
+        <!-- Totales del cliente -->
         <div class="debt-amounts">
           <div class="da-item">
             <span class="da-label">Total deuda</span>
-            <span class="da-value fw-bold">{{ formatCurrency(debt.total) }}</span>
+            <span class="da-value fw-bold">{{ formatCurrency(group.total) }}</span>
           </div>
           <div class="da-item">
             <span class="da-label">Pagado</span>
-            <span class="da-value text-success">{{ formatCurrency(debt.paid) }}</span>
+            <span class="da-value text-success">{{ formatCurrency(group.paid) }}</span>
           </div>
           <div class="da-item da-item-highlight">
             <span class="da-label">Saldo pendiente</span>
-            <span class="da-value text-danger fw-bold">{{ formatCurrency(debt.balance) }}</span>
+            <span class="da-value text-danger fw-bold">{{ formatCurrency(group.balance) }}</span>
           </div>
         </div>
 
-        <!-- Progress Bar -->
+        <!-- Progress Bar del cliente -->
         <div class="debt-progress">
           <div class="debt-progress-label">
-            <span class="text-muted" style="font-size:12px">Progreso de pago</span>
-            <span class="text-muted" style="font-size:12px">{{ getProgressPct(debt) }}%</span>
+            <span class="text-muted" style="font-size:12px">Progreso de pago total</span>
+            <span class="text-muted" style="font-size:12px">{{ getGroupProgressPct(group) }}%</span>
           </div>
           <div class="progress-bar">
-            <div class="progress-fill" :style="`width:${getProgressPct(debt)}%; background:var(--success)`"></div>
+            <div class="progress-fill" :style="`width:${getGroupProgressPct(group)}%; background:var(--success)`"></div>
           </div>
         </div>
 
-        <div class="debt-due" :class="isOverdue(debt) && debt.status !== 'pagada' ? 'text-danger' : 'text-muted'">
-          <Calendar :size="13" style="vertical-align:middle;margin-right:4px" /> Vence: {{ formatDateShort(debt.dueDate) }}
-          <span v-if="isOverdue(debt) && debt.status !== 'pagada'"> <AlertTriangle :size="13" style="vertical-align:middle" /> VENCIDA</span>
+        <div v-if="group.nearestDueDate" class="debt-due" :class="group.hasOverdue ? 'text-danger' : 'text-muted'">
+          <Calendar :size="13" style="vertical-align:middle;margin-right:4px" /> Próximo vencimiento: {{ formatDateShort(group.nearestDueDate) }}
+          <span v-if="group.hasOverdue"> <AlertTriangle :size="13" style="vertical-align:middle" /> TIENE VENCIDAS</span>
         </div>
 
-        <!-- Products -->
-        <div class="debt-products" v-if="debt.items && debt.items.length">
-          <div class="dp-label text-muted">Productos:</div>
-          <div v-for="item in debt.items" :key="item.productId" class="dp-item">
-            <span>{{ item.name }}</span>
-            <span class="text-muted">{{ item.qty }}x {{ formatCurrency(item.price) }}</span>
+        <!-- Desglose de ventas asociadas al cliente -->
+        <div class="client-sales-list">
+          <button class="sales-toggle" @click="toggleExpanded(group.key)">
+            <ChevronDown v-if="isExpanded(group.key)" :size="14" />
+            <ChevronRight v-else :size="14" />
+            Ver detalle de las {{ group.debts.length }} venta{{ group.debts.length === 1 ? '' : 's' }}
+          </button>
+
+          <div v-if="isExpanded(group.key)" class="client-sales-body">
+            <div v-for="debt in sortedGroupDebts(group)" :key="debt.id" class="client-sale-item">
+              <div class="csi-header">
+                <span class="csi-sale-id">Venta #{{ debt.saleId }} — {{ formatDateShort(debt.createdAt) }}</span>
+                <span :class="['badge', getDebtStatus(debt).badge]">{{ getDebtStatus(debt).label }}</span>
+              </div>
+
+              <div class="csi-amounts">
+                <span>Total: <strong>{{ formatCurrency(debt.total) }}</strong></span>
+                <span class="text-success">Pagado: <strong>{{ formatCurrency(debt.paid) }}</strong></span>
+                <span class="text-danger">Saldo: <strong>{{ formatCurrency(debt.balance) }}</strong></span>
+              </div>
+
+              <div class="csi-due" :class="isOverdue(debt) && debt.status !== 'pagada' ? 'text-danger' : 'text-muted'">
+                Vence: {{ formatDateShort(debt.dueDate) }}
+                <span v-if="isOverdue(debt) && debt.status !== 'pagada'">
+                  <AlertTriangle :size="12" style="vertical-align:middle" /> VENCIDA
+                </span>
+              </div>
+
+              <!-- Productos de esta venta -->
+              <div class="debt-products" v-if="debt.items && debt.items.length">
+                <div class="dp-label text-muted">Productos:</div>
+                <div v-for="item in debt.items" :key="item.productId" class="dp-item">
+                  <span>{{ item.name }}</span>
+                  <span class="text-muted">{{ item.qty }}x {{ formatCurrency(item.price) }}</span>
+                </div>
+              </div>
+
+              <!-- Historial de abonos de esta venta -->
+              <div class="payment-history" v-if="debt.payments && debt.payments.length">
+                <div class="ph-label text-muted">Historial de abonos ({{ debt.payments.length }}):</div>
+                <div v-for="p in debt.payments" :key="p.id" class="ph-item">
+                  <span class="text-success ph-amount">+{{ formatCurrency(p.amount) }}</span>
+                  <span class="text-muted ph-date">{{ formatDate(p.date) }}</span>
+                  <span v-if="p.note" class="text-muted ph-note">{{ p.note }}</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- Payment History -->
-        <div class="payment-history" v-if="debt.payments && debt.payments.length">
-          <div class="ph-label text-muted">Historial de abonos ({{ debt.payments.length }}):</div>
-          <div v-for="p in debt.payments" :key="p.id" class="ph-item">
-            <span class="text-success ph-amount">+{{ formatCurrency(p.amount) }}</span>
-            <span class="text-muted ph-date">{{ formatDate(p.date) }}</span>
-            <span v-if="p.note" class="text-muted ph-note">{{ p.note }}</span>
-          </div>
-        </div>
-
-        <!-- Add Payment Button -->
-        <div v-if="debt.status !== 'pagada'" class="add-payment-section">
-          <button class="btn btn-primary" style="width:100%" @click="openPaymentModal(debt)">
-            <CreditCard :size="15" /> Registrar Abono
+        <!-- Registrar Abono a nivel de cliente -->
+        <div v-if="!group.allPaid" class="add-payment-section">
+          <button class="btn btn-primary" style="width:100%" @click="openPaymentModal(group)">
+            <CreditCard :size="15" /> Registrar Abono del Cliente
           </button>
         </div>
         <div v-else class="paid-badge-row">
-          <span class="badge badge-success"><CheckCircle2 :size="14" /> Deuda Saldada</span>
+          <span class="badge badge-success"><CheckCircle2 :size="14" /> Todas sus deudas están saldadas</span>
         </div>
       </div>
     </div>
 
-    <!-- Payment Modal -->
+    <!-- Payment Modal a nivel de cliente -->
     <div v-if="paymentModal.open" class="modal-overlay" @click.self="closePaymentModal">
       <div class="modal payment-modal">
         <div class="modal-header">
@@ -138,30 +175,37 @@
           <button class="modal-close" @click="closePaymentModal"><X :size="20" /></button>
         </div>
         <div class="modal-body">
-          <!-- Debt Summary -->
+          <!-- Client Summary -->
           <div class="pm-summary">
             <div class="pm-client">
-              <div class="debt-avatar pm-avatar">{{ initials(paymentModal.debt?.clientName || '') }}</div>
+              <div class="debt-avatar pm-avatar">{{ initials(paymentModal.group?.clientName || '') }}</div>
               <div>
-                <div class="fw-bold" style="font-size:15px">{{ paymentModal.debt?.clientName }}</div>
-                <div class="text-muted" style="font-size:12px">Venta #{{ paymentModal.debt?.saleId }}</div>
+                <div class="fw-bold" style="font-size:15px">{{ paymentModal.group?.clientName }}</div>
+                <div class="text-muted" style="font-size:12px">
+                  {{ paymentModal.group?.debts?.length }} venta{{ paymentModal.group?.debts?.length === 1 ? '' : 's' }} a crédito
+                  <span v-if="paymentModal.group?.clientId"> · ID: {{ paymentModal.group?.clientId }}</span>
+                </div>
               </div>
             </div>
             <div class="pm-amounts">
               <div class="pm-amount-item">
                 <span class="pm-amount-label">Total deuda</span>
-                <span class="pm-amount-value">{{ formatCurrency(paymentModal.debt?.total) }}</span>
+                <span class="pm-amount-value">{{ formatCurrency(paymentModal.group?.total) }}</span>
               </div>
               <div class="pm-amount-item">
                 <span class="pm-amount-label">Ya pagado</span>
-                <span class="pm-amount-value text-success">{{ formatCurrency(paymentModal.debt?.paid) }}</span>
+                <span class="pm-amount-value text-success">{{ formatCurrency(paymentModal.group?.paid) }}</span>
               </div>
               <div class="pm-amount-item pm-balance">
                 <span class="pm-amount-label">Saldo pendiente</span>
-                <span class="pm-amount-value text-danger fw-bold">{{ formatCurrency(paymentModal.debt?.balance) }}</span>
+                <span class="pm-amount-value text-danger fw-bold">{{ formatCurrency(paymentModal.group?.balance) }}</span>
               </div>
             </div>
           </div>
+
+          <p class="pm-note-text text-muted">
+            El abono se aplicará automáticamente a las ventas pendientes del cliente, empezando por la más próxima a vencer.
+          </p>
 
           <hr class="divider" />
 
@@ -174,7 +218,7 @@
                 v-model.number="paymentModal.amount"
                 type="number"
                 min="1"
-                :max="paymentModal.debt?.balance"
+                :max="paymentModal.group?.balance"
                 class="form-control amount-input"
                 placeholder="0"
                 @keyup.enter="submitPayment"
@@ -201,19 +245,19 @@
           </div>
 
           <!-- Preview of new balance -->
-          <div v-if="paymentModal.amount > 0 && paymentModal.amount <= (paymentModal.debt?.balance || 0)" class="pm-preview">
+          <div v-if="paymentModal.amount > 0 && paymentModal.amount <= (paymentModal.group?.balance || 0)" class="pm-preview">
             <div class="pm-preview-row">
               <span class="text-muted">Abono a registrar</span>
               <span class="text-success fw-bold">+{{ formatCurrency(paymentModal.amount) }}</span>
             </div>
             <div class="pm-preview-row">
-              <span class="text-muted">Nuevo saldo</span>
-              <span class="fw-bold" :class="(paymentModal.debt?.balance - paymentModal.amount) <= 0 ? 'text-success' : 'text-warning'">
-                {{ formatCurrency(Math.max(0, (paymentModal.debt?.balance || 0) - paymentModal.amount)) }}
+              <span class="text-muted">Nuevo saldo del cliente</span>
+              <span class="fw-bold" :class="(paymentModal.group?.balance - paymentModal.amount) <= 0 ? 'text-success' : 'text-warning'">
+                {{ formatCurrency(Math.max(0, (paymentModal.group?.balance || 0) - paymentModal.amount)) }}
               </span>
             </div>
-            <div v-if="(paymentModal.debt?.balance - paymentModal.amount) <= 0" class="pm-paid-label">
-              <CheckCircle2 :size="14" /> Esta deuda quedará completamente saldada
+            <div v-if="(paymentModal.group?.balance - paymentModal.amount) <= 0" class="pm-paid-label">
+              <CheckCircle2 :size="14" /> Todas las deudas de este cliente quedarán saldadas
             </div>
           </div>
         </div>
@@ -232,77 +276,166 @@
 import { ref, reactive, computed } from 'vue'
 import store from '../stores/store.js'
 import { formatCurrency, formatDate, formatDateShort, getDebtStatus } from '../utils/calculations.js'
-import { Wallet, ClipboardList, Clock, AlertOctagon, BadgeDollarSign, Search, Calendar, AlertTriangle, CheckCircle2, CreditCard, X } from '@lucide/vue'
+import {
+  Wallet, ClipboardList, AlertOctagon, BadgeDollarSign, Search, Calendar,
+  AlertTriangle, CheckCircle2, CreditCard, X, Users, ChevronDown, ChevronRight
+} from '@lucide/vue'
 
 const searchQuery = ref('')
 const filterStatus = ref('')
+const expandedKeys = ref(new Set())
 
 const paymentModal = reactive({
   open: false,
-  debt: null,
+  group: null,
   amount: 0,
   note: '',
   amountError: '',
 })
 
-const pendingDebts = computed(() => store.debts.filter(d => d.status === 'pendiente'))
-const overdueDebts = computed(() => store.debts.filter(d => d.status === 'vencida'))
+// ================= AGRUPACION POR CLIENTE =================
+// Agrupa todas las ventas a credito bajo el mismo cliente usando su ID/documento.
+// Si no tiene ID, se agrupa por nombre como respaldo.
+const groupedDebts = computed(() => {
+  const map = new Map()
 
-const filteredDebts = computed(() => {
+  for (const d of store.debts) {
+    const clientKey = d.clientId ?? d.clientDocument ?? null
+    const key = clientKey !== null ? `id-${clientKey}` : `name-${d.clientName || 'Sin Cliente'}`
+
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        clientId: clientKey,
+        clientName: d.clientName || 'Cliente General',
+        debts: [],
+        total: 0,
+        paid: 0,
+        balance: 0,
+        hasOverdue: false,
+        allPaid: true,
+        nearestDueDate: null,
+      })
+    }
+
+    const group = map.get(key)
+    group.debts.push(d)
+    group.total += Number(d.total) || 0
+    group.paid += Number(d.paid) || 0
+    group.balance += Number(d.balance) || 0
+
+    if (d.status !== 'pagada') {
+      group.allPaid = false
+      if (isOverdue(d)) group.hasOverdue = true
+      if (!group.nearestDueDate || new Date(d.dueDate) < new Date(group.nearestDueDate)) {
+        group.nearestDueDate = d.dueDate
+      }
+    }
+  }
+
+  return Array.from(map.values()).sort((a, b) => {
+    const rank = (g) => (g.hasOverdue ? 0 : !g.allPaid ? 1 : 2)
+    return rank(a) - rank(b)
+  })
+})
+
+const clientsWithDebtCount = computed(() => groupedDebts.value.filter(g => !g.allPaid).length)
+const overdueGroupsCount = computed(() => groupedDebts.value.filter(g => g.hasOverdue).length)
+
+const filteredGroups = computed(() => {
   const q = searchQuery.value.toLowerCase()
-  return store.debts.filter(d => {
-    const matchSearch = !q || d.clientName.toLowerCase().includes(q)
-    const matchStatus = !filterStatus.value || d.status === filterStatus.value
+  return groupedDebts.value.filter(g => {
+    const matchSearch = !q
+      || g.clientName.toLowerCase().includes(q)
+      || (g.clientId && String(g.clientId).toLowerCase().includes(q))
+    let matchStatus = true
+    if (filterStatus.value === 'vencida') matchStatus = g.hasOverdue
+    else if (filterStatus.value === 'pendiente') matchStatus = !g.allPaid
+    else if (filterStatus.value === 'pagada') matchStatus = g.allPaid
     return matchSearch && matchStatus
-  }).sort((a, b) => {
-    const order = { vencida: 0, pendiente: 1, pagada: 2 }
-    return order[a.status] - order[b.status]
   })
 })
 
 const initials = (name) => (name || 'X').split(' ').slice(0, 2).map(n => n[0]).join('').toUpperCase()
 const isOverdue = (debt) => debt.status !== 'pagada' && new Date(debt.dueDate) < new Date()
-const getProgressPct = (debt) => {
-  if (!debt || !debt.total || debt.total <= 0) return 100
-  const paid = Number(debt.paid) || 0
-  return Math.min(100, Math.max(0, Math.round((paid / debt.total) * 100)))
+
+function getGroupProgressPct(group) {
+  if (!group || !group.total || group.total <= 0) return 100
+  return Math.min(100, Math.max(0, Math.round((group.paid / group.total) * 100)))
 }
 
-function openPaymentModal(debt) {
+function getGroupStatus(group) {
+  if (group.allPaid) return { badge: 'badge-success', label: 'Saldada' }
+  if (group.hasOverdue) return { badge: 'badge-danger', label: 'Con Vencidas' }
+  return { badge: 'badge-warning', label: 'Pendiente' }
+}
+
+function sortedGroupDebts(group) {
+  return [...group.debts].sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))
+}
+
+function toggleExpanded(key) {
+  const next = new Set(expandedKeys.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  expandedKeys.value = next
+}
+function isExpanded(key) {
+  return expandedKeys.value.has(key)
+}
+
+// ================= MODAL DE ABONO (a nivel de cliente) =================
+function openPaymentModal(group) {
   paymentModal.open = true
-  paymentModal.debt = debt
-  paymentModal.amount = debt.balance
+  paymentModal.group = group
+  paymentModal.amount = group.balance
   paymentModal.note = ''
   paymentModal.amountError = ''
 }
 
 function closePaymentModal() {
   paymentModal.open = false
-  paymentModal.debt = null
+  paymentModal.group = null
   paymentModal.amount = 0
   paymentModal.note = ''
   paymentModal.amountError = ''
 }
 
 function setQuickAmount(pct) {
-  if (!paymentModal.debt) return
+  if (!paymentModal.group) return
   paymentModal.amount = pct === 100
-    ? paymentModal.debt.balance
-    : Math.round((paymentModal.debt.balance * pct) / 100)
+    ? paymentModal.group.balance
+    : Math.round((paymentModal.group.balance * pct) / 100)
 }
 
+// El abono se reparte entre las ventas pendientes del cliente,
+// empezando por la que vence mas pronto, hasta agotar el monto ingresado.
 function submitPayment() {
   paymentModal.amountError = ''
   const amt = Number(paymentModal.amount) || 0
+
   if (amt <= 0) {
-    paymentModal.amountError = 'Ingresa un monto válido mayor a 0'
+    paymentModal.amountError = 'Ingresa un monto valido mayor a 0'
     return
   }
-  if (amt > (paymentModal.debt?.balance || 0)) {
-    paymentModal.amountError = 'El abono supera el saldo pendiente'
+  if (amt > (paymentModal.group?.balance || 0)) {
+    paymentModal.amountError = 'El abono supera el saldo pendiente del cliente'
     return
   }
-  store.addPayment(paymentModal.debt.id, amt, paymentModal.note.trim())
+
+  const pendingDebtsOfClient = sortedGroupDebts(paymentModal.group)
+    .filter(d => d.status !== 'pagada' && (Number(d.balance) || 0) > 0)
+
+  let remaining = amt
+  for (const debt of pendingDebtsOfClient) {
+    if (remaining <= 0) break
+    const toApply = Math.min(remaining, Number(debt.balance) || 0)
+    if (toApply > 0) {
+      store.addPayment(debt.id, toApply, paymentModal.note.trim())
+      remaining -= toApply
+    }
+  }
+
   closePaymentModal()
 }
 </script>
@@ -329,7 +462,16 @@ function submitPayment() {
   font-family: var(--font-brand); font-size: 14px; font-weight: 700; color: white;
   flex-shrink: 0;
 }
-.debt-client-name { font-size: 16px; font-weight: 700; }
+.debt-client-name { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.client-id-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+}
 .debt-meta { font-size: 12px; }
 
 .debt-amounts {
@@ -355,6 +497,57 @@ function submitPayment() {
 .debt-progress { margin-bottom: 10px; }
 
 .debt-due { font-size: 13px; margin-bottom: 10px; }
+
+/* Desglose de ventas del cliente */
+.client-sales-list { margin-bottom: 10px; }
+.sales-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.sales-toggle:hover { text-decoration: underline; }
+
+.client-sales-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 12px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+}
+.client-sale-item {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+}
+.csi-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.csi-sale-id { font-size: 13px; font-weight: 600; }
+.csi-amounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.csi-due { font-size: 12px; margin-bottom: 8px; }
 
 .debt-products { margin-bottom: 10px; }
 .dp-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
@@ -383,6 +576,12 @@ function submitPayment() {
 }
 .pm-client { display: flex; align-items: center; gap: 12px; }
 .pm-avatar { width: 36px; height: 36px; font-size: 12px; }
+
+.pm-note-text {
+  font-size: 12px;
+  margin: 10px 0 0;
+  line-height: 1.4;
+}
 
 .pm-amounts {
   display: grid;
@@ -455,6 +654,8 @@ function submitPayment() {
     grid-column: 1 / -1;
   }
   .da-value { font-size: 14px; }
+
+  .csi-amounts { flex-direction: column; gap: 4px; }
 
   .pm-amounts {
     grid-template-columns: 1fr 1fr;
