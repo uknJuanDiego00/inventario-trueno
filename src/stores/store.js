@@ -89,7 +89,7 @@ const store = reactive({
   updateProduct(id, data) {
     const idx = this.products.findIndex(p => p.id === id)
     if (idx !== -1) {
-      this.products[idx] = { ...this.products[idx], ...data }
+      this.products[idx] = { ...this.products[idx], ...data, updatedAt: new Date().toISOString() }
       this.saveProducts()
       this.notify('Producto actualizado', 'success')
     }
@@ -110,6 +110,7 @@ const store = reactive({
       const newStock = p.stock + delta
       if (newStock < 0) return false
       p.stock = newStock
+      p.updatedAt = new Date().toISOString()
       this.saveProducts()
       return true
     }
@@ -150,7 +151,7 @@ const store = reactive({
   updateClient(id, data) {
     const idx = this.clients.findIndex(c => c.id === id)
     if (idx !== -1) {
-      this.clients[idx] = { ...this.clients[idx], ...data }
+      this.clients[idx] = { ...this.clients[idx], ...data, updatedAt: new Date().toISOString() }
       this.saveClients()
       this.notify('Cliente actualizado', 'success')
     }
@@ -355,14 +356,17 @@ const store = reactive({
       this.notify('El abono supera el saldo pendiente', 'warning')
       return
     }
+    const now = new Date().toISOString()
     debt.paid = (Number(debt.paid) || 0) + numAmount
     debt.balance = Math.max(0, (Number(debt.balance) || 0) - numAmount)
-    debt.payments.push({ id: nextId('payment'), amount: numAmount, date: new Date().toISOString(), note })
+    debt.payments.push({ id: nextId('payment'), amount: numAmount, date: now, note })
+    debt.updatedAt = now
 
     // Always sync the sale's paid field with the new payment amount
     const sale = this.sales.find(s => s.id === debt.saleId)
     if (sale) {
       sale.paid = Math.min(sale.total, (Number(sale.paid) || 0) + numAmount)
+      sale.updatedAt = now
     }
 
     if (debt.balance <= 0) {
@@ -375,7 +379,6 @@ const store = reactive({
     }
 
     this.saveSales()
-    // Update debt status if overdue
     this.updateDebtStatuses()
     this.saveDebts()
   },

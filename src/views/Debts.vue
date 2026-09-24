@@ -119,6 +119,9 @@
                 <span class="csi-sale-id">Venta #{{ debt.saleId }} — {{ formatDateShort(debt.createdAt) }}</span>
                 <span :class="['badge', getDebtStatus(debt).badge]">{{ getDebtStatus(debt).label }}</span>
               </div>
+              <div v-if="debt.updatedAt" class="csi-updated">
+                ✏️ Modificado: {{ formatDate(debt.updatedAt) }}
+              </div>
 
               <div class="csi-amounts">
                 <span>Total: <strong>{{ formatCurrency(debt.total) }}</strong></span>
@@ -482,7 +485,6 @@ function decrementDebtItem(debt, itemIndex) {
   if (!item) return
   const unitPrice = Number(item.price) || 0
   if (item.qty <= 1) {
-    // Eliminar el producto si llega a 0
     if (debt.items.length <= 1) {
       store.notify('No puedes quitar el único producto. Registra un abono completo para saldar la deuda.', 'warning')
       return
@@ -492,13 +494,13 @@ function decrementDebtItem(debt, itemIndex) {
     item.qty -= 1
     item.subtotal = item.qty * unitPrice
   }
-  // Recalcular deuda
+  const now = new Date().toISOString()
   const newTotal = Math.max(0, Number(debt.total) - unitPrice)
   const newBalance = Math.max(0, newTotal - Number(debt.paid))
   debt.total = newTotal
   debt.balance = newBalance
+  debt.updatedAt = now
   if (newBalance <= 0) debt.status = 'pagada'
-  // Sincronizar venta
   const sale = store.sales.find(s => s.id === debt.saleId)
   if (sale) {
     const si = sale.items.find(i => i.productId === item.productId)
@@ -508,6 +510,7 @@ function decrementDebtItem(debt, itemIndex) {
     }
     sale.total = Math.max(0, Number(sale.total) - unitPrice)
     sale.subtotal = sale.items.reduce((s, i) => s + (Number(i.subtotal) || 0), 0)
+    sale.updatedAt = now
   }
   store.saveDebts()
   store.saveSales()
@@ -520,12 +523,13 @@ function incrementDebtItem(debt, itemIndex) {
   const unitPrice = Number(item.price) || 0
   item.qty += 1
   item.subtotal = item.qty * unitPrice
+  const now = new Date().toISOString()
   const newTotal = Number(debt.total) + unitPrice
   const newBalance = Math.max(0, newTotal - Number(debt.paid))
   debt.total = newTotal
   debt.balance = newBalance
+  debt.updatedAt = now
   if (debt.status === 'pagada' && newBalance > 0) debt.status = 'pendiente'
-  // Sincronizar venta
   const sale = store.sales.find(s => s.id === debt.saleId)
   if (sale) {
     const si = sale.items.find(i => i.productId === item.productId)
@@ -533,6 +537,7 @@ function incrementDebtItem(debt, itemIndex) {
     else sale.items.push({ ...item })
     sale.total = Number(sale.total) + unitPrice
     sale.subtotal = sale.items.reduce((s, i) => s + (Number(i.subtotal) || 0), 0)
+    sale.updatedAt = now
   }
   store.saveDebts()
   store.saveSales()
@@ -639,6 +644,16 @@ function incrementDebtItem(debt, itemIndex) {
   flex-wrap: wrap;
 }
 .csi-sale-id { font-size: 13px; font-weight: 600; }
+.csi-updated {
+  font-size: 11px;
+  color: var(--accent);
+  background: rgba(216,235,52,0.06);
+  border: 1px solid rgba(216,235,52,0.18);
+  border-radius: 4px;
+  padding: 2px 7px;
+  margin-bottom: 6px;
+  display: inline-block;
+}
 .csi-amounts {
   display: flex;
   flex-wrap: wrap;

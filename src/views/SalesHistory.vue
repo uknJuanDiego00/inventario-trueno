@@ -37,6 +37,7 @@
             <tr>
               <th>#</th>
               <th>Fecha</th>
+              <th>Modificado</th>
               <th>Cliente</th>
               <th>Productos</th>
               <th>Total</th>
@@ -58,6 +59,10 @@
             <tr v-for="sale in filteredSales" :key="sale.id" @click="viewSale(sale)" style="cursor:pointer">
               <td class="text-accent fw-600">#{{ sale.id }}</td>
               <td class="text-muted" style="white-space:nowrap">{{ formatDate(sale.date) }}</td>
+              <td class="text-muted" style="white-space:nowrap; font-size:11px">
+                <span v-if="sale.updatedAt" class="updated-badge">✏️ {{ formatDate(sale.updatedAt) }}</span>
+                <span v-else class="text-muted">—</span>
+              </td>
               <td>
                 <div class="fw-600">{{ sale.clientName }}</div>
               </td>
@@ -143,7 +148,7 @@
               <span class="sd-value fw-600">{{ selectedSale.clientName }}</span>
             </div>
             <div class="sd-item">
-              <span class="sd-label">Fecha</span>
+              <span class="sd-label">Fecha de venta</span>
               <span class="sd-value">{{ formatDate(selectedSale.date) }}</span>
             </div>
             <div class="sd-item">
@@ -153,6 +158,10 @@
             <div class="sd-item">
               <span class="sd-label">Estado</span>
               <span :class="selectedSale.status === 'pagada' ? 'badge badge-success' : 'badge badge-warning'">{{ selectedSale.status }}</span>
+            </div>
+            <div v-if="selectedSale.updatedAt" class="sd-item" style="grid-column:1/-1; background:rgba(216,235,52,0.06); border:1px solid rgba(216,235,52,0.2)">
+              <span class="sd-label">✏️ Última modificación</span>
+              <span class="sd-value fw-600" style="color:var(--accent)">{{ formatDate(selectedSale.updatedAt) }}</span>
             </div>
           </div>
           <hr class="divider" />
@@ -240,6 +249,15 @@ const viewSale = (sale) => { selectedSale.value = sale }
   padding: 8px 14px;
   font-size: 13px;
   color: var(--text-secondary);
+}
+.updated-badge {
+  font-size: 10px;
+  color: var(--accent);
+  background: rgba(216,235,52,0.08);
+  border: 1px solid rgba(216,235,52,0.2);
+  border-radius: 4px;
+  padding: 2px 5px;
+  white-space: nowrap;
 }
 
 /* Filters */
