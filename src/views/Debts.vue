@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="page-container">
     <div class="page-header">
       <div>
@@ -136,9 +136,19 @@
               <!-- Productos de esta venta -->
               <div class="debt-products" v-if="debt.items && debt.items.length">
                 <div class="dp-label text-muted">Productos:</div>
-                <div v-for="item in debt.items" :key="item.productId" class="dp-item">
-                  <span>{{ item.name }}</span>
-                  <span class="text-muted">{{ item.qty }}x {{ formatCurrency(item.price) }}</span>
+                <div v-for="(item, iIdx) in debt.items" :key="item.productId" class="dp-item">
+                  <span class="dp-name">{{ item.name }}</span>
+                  <div v-if="debt.status !== 'pagada'" class="dp-stepper">
+                    <button class="dp-step-btn" @click="decrementDebtItem(debt, iIdx)" title="Quitar una unidad">
+                      <Minus :size="11" />
+                    </button>
+                    <span class="dp-qty">{{ item.qty }}</span>
+                    <button class="dp-step-btn" @click="incrementDebtItem(debt, iIdx)" title="Agregar una unidad">
+                      <Plus :size="11" />
+                    </button>
+                  </div>
+                  <span v-else class="text-muted dp-qty-static">{{ item.qty }}x</span>
+                  <span class="dp-subtotal">{{ formatCurrency(item.subtotal || item.price * item.qty) }}</span>
                 </div>
               </div>
 
@@ -278,7 +288,7 @@ import store from '../stores/store.js'
 import { formatCurrency, formatDate, formatDateShort, getDebtStatus } from '../utils/calculations.js'
 import {
   Wallet, ClipboardList, AlertOctagon, BadgeDollarSign, Search, Calendar,
-  AlertTriangle, CheckCircle2, CreditCard, X, Users, ChevronDown, ChevronRight
+  AlertTriangle, CheckCircle2, CreditCard, X, Users, ChevronDown, ChevronRight, Trash2, Minus, Plus
 } from '@lucide/vue'
 
 const searchQuery = ref('')
@@ -438,6 +448,96 @@ function submitPayment() {
 
   closePaymentModal()
 }
+
+function removeDebtItem(debt, itemIndex) {
+  const item = debt.items[itemIndex]
+  if (!item) return
+  const itemTotal = Number(item.subtotal) || (Number(item.price) * Number(item.qty))
+  if (debt.items.length <= 1) {
+    store.notify('No puedes eliminar el único producto. Registra un abono completo para saldar la deuda.', 'warning')
+    return
+  }
+  // Actualizar la deuda
+  debt.items.splice(itemIndex, 1)
+  const newTotal = Math.max(0, Number(debt.total) - itemTotal)
+  const newBalance = Math.max(0, newTotal - Number(debt.paid))
+  debt.total = newTotal
+  debt.balance = newBalance
+  if (newBalance <= 0) debt.status = 'pagada'
+  // Actualizar la venta asociada
+  const sale = store.sales.find(s => s.id === debt.saleId)
+  if (sale) {
+    const saleItemIdx = sale.items.findIndex(i => i.productId === item.productId)
+    if (saleItemIdx !== -1) sale.items.splice(saleItemIdx, 1)
+    sale.total = Math.max(0, Number(sale.total) - itemTotal)
+    sale.subtotal = sale.items.reduce((s, i) => s + (Number(i.subtotal) || 0), 0)
+  }
+  store.saveDebts()
+  store.saveSales()
+  store.notify(`Producto "${item.name}" eliminado de la deuda`, 'info')
+}
+
+function decrementDebtItem(debt, itemIndex) {
+  const item = debt.items[itemIndex]
+  if (!item) return
+  const unitPrice = Number(item.price) || 0
+  if (item.qty <= 1) {
+    // Eliminar el producto si llega a 0
+    if (debt.items.length <= 1) {
+      store.notify('No puedes quitar el único producto. Registra un abono completo para saldar la deuda.', 'warning')
+      return
+    }
+    debt.items.splice(itemIndex, 1)
+  } else {
+    item.qty -= 1
+    item.subtotal = item.qty * unitPrice
+  }
+  // Recalcular deuda
+  const newTotal = Math.max(0, Number(debt.total) - unitPrice)
+  const newBalance = Math.max(0, newTotal - Number(debt.paid))
+  debt.total = newTotal
+  debt.balance = newBalance
+  if (newBalance <= 0) debt.status = 'pagada'
+  // Sincronizar venta
+  const sale = store.sales.find(s => s.id === debt.saleId)
+  if (sale) {
+    const si = sale.items.find(i => i.productId === item.productId)
+    if (si) {
+      if (si.qty <= 1) sale.items.splice(sale.items.indexOf(si), 1)
+      else { si.qty -= 1; si.subtotal = si.qty * unitPrice }
+    }
+    sale.total = Math.max(0, Number(sale.total) - unitPrice)
+    sale.subtotal = sale.items.reduce((s, i) => s + (Number(i.subtotal) || 0), 0)
+  }
+  store.saveDebts()
+  store.saveSales()
+  store.notify('Unidad quitada y deuda actualizada', 'info')
+}
+
+function incrementDebtItem(debt, itemIndex) {
+  const item = debt.items[itemIndex]
+  if (!item) return
+  const unitPrice = Number(item.price) || 0
+  item.qty += 1
+  item.subtotal = item.qty * unitPrice
+  const newTotal = Number(debt.total) + unitPrice
+  const newBalance = Math.max(0, newTotal - Number(debt.paid))
+  debt.total = newTotal
+  debt.balance = newBalance
+  if (debt.status === 'pagada' && newBalance > 0) debt.status = 'pendiente'
+  // Sincronizar venta
+  const sale = store.sales.find(s => s.id === debt.saleId)
+  if (sale) {
+    const si = sale.items.find(i => i.productId === item.productId)
+    if (si) { si.qty += 1; si.subtotal = si.qty * unitPrice }
+    else sale.items.push({ ...item })
+    sale.total = Number(sale.total) + unitPrice
+    sale.subtotal = sale.items.reduce((s, i) => s + (Number(i.subtotal) || 0), 0)
+  }
+  store.saveDebts()
+  store.saveSales()
+  store.notify('Unidad agregada y deuda actualizada', 'info')
+}
 </script>
 
 <style scoped>
@@ -551,8 +651,61 @@ function submitPayment() {
 
 .debt-products { margin-bottom: 10px; }
 .dp-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
-.dp-item { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; border-bottom: 1px solid var(--border-color); }
+.dp-item {
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border-color);
+  gap: 8px;
+}
 .dp-item:last-child { border-bottom: none; }
+.dp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dp-stepper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.dp-step-btn {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: background 0.15s, color 0.15s;
+  padding: 0;
+}
+.dp-step-btn:hover { background: var(--accent-subtle); color: var(--accent); border-color: var(--accent); }
+.dp-qty {
+  font-family: var(--font-brand);
+  font-size: 13px;
+  font-weight: 700;
+  min-width: 22px;
+  text-align: center;
+  color: var(--text-primary);
+}
+.dp-qty-static { font-size: 12px; color: var(--text-muted); flex-shrink: 0; }
+.dp-subtotal {
+  font-family: var(--font-brand);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+.dp-remove-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 2px 4px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  transition: color 0.15s, background 0.15s;
+}
+.dp-remove-btn:hover { color: var(--danger, #ff3b5c); background: rgba(255,59,92,0.1); }
 
 .payment-history { margin-bottom: 12px; background: var(--bg-secondary); border-radius: var(--radius-md); padding: 10px 12px; }
 .ph-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; font-weight: 600; }

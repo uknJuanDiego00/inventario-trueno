@@ -291,6 +291,18 @@
                 <span class="calc-value">{{ formatCurrency(cartSubtotal) }}</span>
               </div>
 
+              <!-- Mano de obra -->
+              <div class="calc-row discount-row">
+                <span class="calc-label">Mano de obra ($)</span>
+                <input
+                  v-model.number="laborCost"
+                  type="number"
+                  min="0"
+                  placeholder="0"
+                  class="discount-input"
+                />
+              </div>
+
               <!-- Descuento opcional para el dueño -->
               <div class="calc-row discount-row">
                 <span class="calc-label">Descuento ($)</span>
@@ -298,7 +310,7 @@
                   v-model.number="discountAmount"
                   type="number"
                   min="0"
-                  :max="cartSubtotal"
+                  :max="cartSubtotal + laborCost"
                   placeholder="0"
                   class="discount-input"
                 />
@@ -327,16 +339,40 @@
                   <UserPlus :size="14" /> Registrar Cliente
                 </button>
               </div>
-              <select
-                v-model="selectedClientId"
-                class="form-control client-select"
-                :class="{ 'select-required-pending': !selectedClientId }"
-              >
-                <option value="" disabled>-- Elige un cliente (Obligatorio) --</option>
-                <option v-for="c in store.clients" :key="c.id" :value="c.id">
-                  {{ c.document }} — {{ c.name }}
-                </option>
-              </select>
+
+              <!-- Buscador de cliente -->
+              <div class="client-search-wrapper" ref="clientSearchRef">
+                <div class="client-search-input-row">
+                  <span class="client-search-icon"><Search :size="16" /></span>
+                  <input
+                    v-model="clientSearchQuery"
+                    type="text"
+                    class="form-control client-search-input"
+                    :class="{ 'select-required-pending': !selectedClientId }"
+                    placeholder="Buscar por cédula o nombre..."
+                    @focus="clientDropdownOpen = true"
+                    @input="clientDropdownOpen = true; selectedClientId = ''"
+                    @blur="handleClientBlur"
+                    autocomplete="off"
+                  />
+                  <button v-if="clientSearchQuery" class="clear-btn" @click="clearClientSearch"><X :size="14" /></button>
+                </div>
+                <div v-if="clientDropdownOpen && filteredClients.length > 0" class="client-dropdown">
+                  <div
+                    v-for="c in filteredClients"
+                    :key="c.id"
+                    class="client-dropdown-item"
+                    @mousedown.prevent="selectClient(c)"
+                  >
+                    <span class="cdi-doc">{{ c.document }}</span>
+                    <span class="cdi-name">{{ c.name }}</span>
+                  </div>
+                </div>
+                <div v-if="clientDropdownOpen && clientSearchQuery && filteredClients.length === 0" class="client-dropdown">
+                  <div class="cdi-empty">Sin resultados</div>
+                </div>
+              </div>
+
               <div v-if="selectedClientInfo" class="selected-client-badge">
                 <User :size="13" />
                 <span class="scb-doc">CC/NIT: {{ selectedClientInfo.document }}</span>
@@ -656,11 +692,41 @@ const selectedCategory = ref('')
 const onlyInStock = ref(false) // Por defecto muestra todos los productos con sus insignias de stock
 const cart = ref([])
 const discountAmount = ref(0)
+const laborCost = ref(0)
 const selectedClientId = ref('')
 const selectedPaymentMethod = ref('Efectivo')
 const cashReceived = ref(null)
 const creditAdvance = ref(0)
 const interestRate = ref(0)
+
+// Cliente search
+const clientSearchQuery = ref('')
+const clientDropdownOpen = ref(false)
+const clientSearchRef = ref(null)
+
+function clearClientSearch() {
+  clientSearchQuery.value = ''
+  selectedClientId.value = ''
+  clientDropdownOpen.value = false
+}
+
+function selectClient(c) {
+  selectedClientId.value = c.id
+  clientSearchQuery.value = `${c.document} — ${c.name}`
+  clientDropdownOpen.value = false
+}
+
+function handleClientBlur() {
+  setTimeout(() => { clientDropdownOpen.value = false }, 150)
+}
+
+const filteredClients = computed(() => {
+  const q = clientSearchQuery.value.trim().toLowerCase()
+  if (!q) return store.clients.slice(0, 20)
+  return store.clients.filter(c =>
+    c.document.toLowerCase().includes(q) || c.name.toLowerCase().includes(q)
+  ).slice(0, 20)
+})
 
 // Modales
 const showQuickClientModal = ref(false)
@@ -735,7 +801,8 @@ const cartSubtotal = computed(() => cart.value.reduce((sum, item) => sum + item.
 
 const cartTotal = computed(() => {
   const disc = Math.max(0, Number(discountAmount.value) || 0)
-  return Math.max(0, cartSubtotal.value - disc)
+  const labor = Math.max(0, Number(laborCost.value) || 0)
+  return Math.max(0, cartSubtotal.value + labor - disc)
 })
 
 // Atajos para cambio de efectivo según el total
@@ -911,6 +978,7 @@ function removeFromCart(index) {
 function clearCart() {
   cart.value = []
   discountAmount.value = 0
+  laborCost.value = 0
   cashReceived.value = null
   creditAdvance.value = 0
 }
@@ -944,6 +1012,8 @@ function saveQuickClient() {
   })
   if (!newC) return // Duplicate document prevented
   selectedClientId.value = newC.id
+  clientSearchQuery.value = `${newC.document} — ${newC.name}`
+  clientDropdownOpen.value = false
   showQuickClientModal.value = false
   quickClient.value = { document: '', name: '', phone: '', notes: '' }
   store.notify(`Cliente ${newC.name} (${newC.document}) creado y seleccionado`, 'success')
@@ -994,6 +1064,7 @@ function submitSale() {
     total: cartTotal.value,
     paid: paidAmount,
     discount: Number(discountAmount.value) || 0,
+    laborCost: Number(laborCost.value) || 0,
     interestRate: currentInterest,
   }
 
@@ -1014,6 +1085,8 @@ function resetForNewSale() {
   completedSale.value = null
   clearCart()
   selectedClientId.value = ''
+  clientSearchQuery.value = ''
+  clientDropdownOpen.value = false
   selectedPaymentMethod.value = 'Efectivo'
   cashReceived.value = null
   creditAdvance.value = 0
@@ -1943,6 +2016,57 @@ function resetForNewSale() {
   color: var(--text-secondary);
   font-weight: 500;
 }
+
+/* Buscador de cliente */
+.client-search-wrapper { position: relative; }
+.client-search-input-row {
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+.client-search-icon {
+  position: absolute;
+  left: 10px;
+  color: var(--text-muted);
+  pointer-events: none;
+  z-index: 1;
+}
+.client-search-input {
+  padding-left: 34px !important;
+  padding-right: 32px !important;
+}
+.client-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0; right: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  z-index: 300;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.client-dropdown-item {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 9px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-color);
+  transition: background 0.15s;
+}
+.client-dropdown-item:last-child { border-bottom: none; }
+.client-dropdown-item:hover { background: var(--accent-subtle); }
+.cdi-doc {
+  font-family: var(--font-brand);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.cdi-name { font-size: 13px; color: var(--text-primary); }
+.cdi-empty { padding: 10px 12px; font-size: 13px; color: var(--text-muted); text-align: center; }
 
 /* Sección de Interés */
 .interest-section {
