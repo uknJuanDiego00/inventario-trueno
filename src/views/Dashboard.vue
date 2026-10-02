@@ -118,13 +118,29 @@
             </span>
             <div class="alert-info">
               <span class="alert-name">{{ p.name }}</span>
-              <span class="alert-qty" :class="p.stock <= 0 ? 'text-danger' : 'text-warning'">
-                {{ p.stock <= 0 ? 'AGOTADO' : `quedan ${p.stock} unidades` }}
+              <div class="alert-stock-breakdown">
+                <span :class="p.stock <= 0 ? 'text-danger fw-600' : 'text-warning fw-600'">
+                  <Store :size="12" /> {{ p.stock }} disponibles
+                </span>
+                <span class="alert-loc-sep">•</span>
+                <span class="text-accent fw-600">
+                  <Warehouse :size="12" /> {{ p.warehouseStock || 0 }} bodega
+                </span>
+              </div>
+            </div>
+            <div class="alert-actions-right">
+              <button
+                v-if="(p.warehouseStock || 0) > 0"
+                class="btn-alert-restock"
+                @click="passToStore(p, 1)"
+                title="Pasar 1 unidad de Bodega a Tienda"
+              >
+                <ArrowUpRight :size="12" /> Pasar 1 a tienda
+              </button>
+              <span :class="p.stock <= 0 ? 'badge badge-danger' : 'badge badge-warning'">
+                {{ p.stock <= 0 ? ((p.warehouseStock || 0) > 0 ? 'Solo bodega' : 'Agotado') : 'Stock bajo' }}
               </span>
             </div>
-            <span :class="p.stock <= 0 ? 'badge badge-danger' : 'badge badge-warning'">
-              {{ p.stock <= 0 ? 'Agotado' : 'Stock bajo' }}
-            </span>
           </div>
         </div>
       </div>
@@ -165,7 +181,8 @@ import store from '../stores/store.js'
 import { formatCurrency, formatDate, formatNumber, getWeeklySalesData, getMonthlySalesData } from '../utils/calculations.js'
 import {
   Package, ShoppingCart, Users, Wallet, TrendingUp, Banknote,
-  Target, Trophy, BarChart2, AlertTriangle, CheckCircle, XCircle, TriangleAlert
+  Target, Trophy, BarChart2, AlertTriangle, CheckCircle, XCircle, TriangleAlert,
+  Store, Warehouse, ArrowUpRight
 } from '@lucide/vue'
 
 const chartMode = ref('week')
@@ -185,6 +202,10 @@ const alertProducts = computed(() => {
   const threshold = store.config.lowStockThreshold
   return store.products.filter(p => p.stock <= (p.minStock || threshold)).sort((a,b) => a.stock - b.stock)
 })
+
+function passToStore(product, qty = 1) {
+  store.transferStock(product.id, 'warehouse', 'store', qty)
+}
 
 const recentSales = computed(() => [...store.sales].sort((a,b) => new Date(b.date) - new Date(a.date)).slice(0, 6))
 
@@ -399,9 +420,47 @@ onUnmounted(() => {
 .alert-warning { background: var(--warning-bg); border-color: rgba(245,166,35,0.2); }
 .alert-danger { background: var(--danger-bg); border-color: rgba(255,59,92,0.2); }
 .alert-dot { font-size: 18px; }
-.alert-info { flex: 1; }
-.alert-name { display: block; font-size: 14px; font-weight: 500; }
-.alert-qty { font-size: 12px; }
+.alert-info { flex: 1; min-width: 0; }
+.alert-name { display: block; font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.alert-stock-breakdown {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin-top: 2px;
+}
+.alert-loc-store, .alert-loc-bodega {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.alert-loc-sep {
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+.alert-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.btn-alert-restock {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: opacity 0.15s ease;
+  white-space: nowrap;
+}
+.btn-alert-restock:hover {
+  opacity: 0.9;
+}
 
 .recent-sales-list { display: flex; flex-direction: column; gap: 8px; }
 .recent-sale-item {

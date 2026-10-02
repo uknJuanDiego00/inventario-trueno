@@ -27,14 +27,14 @@ function nextId(type) {
 // ---- Initial Clean Data (All metrics starting at 0) ----
 function generateDemoData() {
   const products = [
-    { id: 1, name: 'Espejos Deportivos CNC', category: 'Espejos', description: 'Espejos de aluminio CNC anodizado', buyPrice: 18000, sellPrice: 35000, stock: 12, minStock: 5, sku: 'ESP-001', image: null, totalSold: 0, createdAt: new Date().toISOString() },
-    { id: 2, name: 'Maniguetas CNC Plegables', category: 'Maniguetas', description: 'Maniguetas plegables de alta resistencia', buyPrice: 22000, sellPrice: 45000, stock: 10, minStock: 3, sku: 'MAN-001', image: null, totalSold: 0, createdAt: new Date().toISOString() },
-    { id: 3, name: 'Direccionales LED Ámbar', category: 'Direccionales', description: 'Direccionales LED de alta visibilidad', buyPrice: 12000, sellPrice: 25000, stock: 15, minStock: 5, sku: 'DIR-001', image: null, totalSold: 0, createdAt: new Date().toISOString() },
-    { id: 4, name: 'Luces LED para Moto', category: 'Luces', description: 'Kit de luces LED multicolor', buyPrice: 15000, sellPrice: 30000, stock: 8, minStock: 4, sku: 'LUZ-001', image: null, totalSold: 0, createdAt: new Date().toISOString() },
-    { id: 5, name: 'Protector de Motor', category: 'Protección', description: 'Jaula de protección de motor aluminio', buyPrice: 45000, sellPrice: 90000, stock: 5, minStock: 2, sku: 'PRO-001', image: null, totalSold: 0, createdAt: new Date().toISOString() },
-    { id: 6, name: 'Soporte para Celular', category: 'Accesorios', description: 'Soporte universal resistente al agua', buyPrice: 10000, sellPrice: 22000, stock: 20, minStock: 5, sku: 'SOC-001', image: null, totalSold: 0, createdAt: new Date().toISOString() },
-    { id: 7, name: 'Slider para Moto', category: 'Protección', description: 'Sliders anticaída de poliamida', buyPrice: 25000, sellPrice: 55000, stock: 7, minStock: 3, sku: 'SLI-001', image: null, totalSold: 0, createdAt: new Date().toISOString() },
-    { id: 8, name: 'Porta Placa Deportivo', category: 'Estética', description: 'Porta placa con led integrado', buyPrice: 8000, sellPrice: 18000, stock: 14, minStock: 4, sku: 'POR-001', image: null, totalSold: 0, createdAt: new Date().toISOString() },
+    { id: 1, name: 'Espejos Deportivos CNC', category: 'Espejos', description: 'Espejos de aluminio CNC anodizado', buyPrice: 18000, sellPrice: 35000, stock: 12, warehouseStock: 8, minStock: 5, sku: 'ESP-001', image: null, totalSold: 0, createdAt: new Date().toISOString() },
+    { id: 2, name: 'Maniguetas CNC Plegables', category: 'Maniguetas', description: 'Maniguetas plegables de alta resistencia', buyPrice: 22000, sellPrice: 45000, stock: 10, warehouseStock: 6, minStock: 3, sku: 'MAN-001', image: null, totalSold: 0, createdAt: new Date().toISOString() },
+    { id: 3, name: 'Direccionales LED Ámbar', category: 'Direccionales', description: 'Direccionales LED de alta visibilidad', buyPrice: 12000, sellPrice: 25000, stock: 15, warehouseStock: 10, minStock: 5, sku: 'DIR-001', image: null, totalSold: 0, createdAt: new Date().toISOString() },
+    { id: 4, name: 'Luces LED para Moto', category: 'Luces', description: 'Kit de luces LED multicolor', buyPrice: 15000, sellPrice: 30000, stock: 3, warehouseStock: 5, minStock: 4, sku: 'LUZ-001', image: null, totalSold: 0, createdAt: new Date().toISOString() },
+    { id: 5, name: 'Protector de Motor', category: 'Protección', description: 'Jaula de protección de motor aluminio', buyPrice: 45000, sellPrice: 90000, stock: 5, warehouseStock: 4, minStock: 2, sku: 'PRO-001', image: null, totalSold: 0, createdAt: new Date().toISOString() },
+    { id: 6, name: 'Soporte para Celular', category: 'Accesorios', description: 'Soporte universal resistente al agua', buyPrice: 10000, sellPrice: 22000, stock: 20, warehouseStock: 15, minStock: 5, sku: 'SOC-001', image: null, totalSold: 0, createdAt: new Date().toISOString() },
+    { id: 7, name: 'Slider para Moto', category: 'Protección', description: 'Sliders anticaída de poliamida', buyPrice: 25000, sellPrice: 55000, stock: 7, warehouseStock: 5, minStock: 3, sku: 'SLI-001', image: null, totalSold: 0, createdAt: new Date().toISOString() },
+    { id: 8, name: 'Porta Placa Deportivo', category: 'Estética', description: 'Porta placa con led integrado', buyPrice: 8000, sellPrice: 18000, stock: 14, warehouseStock: 10, minStock: 4, sku: 'POR-001', image: null, totalSold: 0, createdAt: new Date().toISOString() },
   ]
 
   const clients = [
@@ -57,8 +57,20 @@ if (isFirstRun) {
   localStorage.setItem('trueno_initialized', '1')
 }
 
+// Load products and ensure warehouseStock is defined on all items
+const initialProducts = load('products', demoData.products || [])
+initialProducts.forEach(p => {
+  p.stock = Math.max(0, Number(p.stock) || 0)
+  if (p.warehouseStock === undefined || p.warehouseStock === null || isNaN(p.warehouseStock)) {
+    // If it's the demo lights or previously loaded without warehouseStock
+    p.warehouseStock = p.name?.toLowerCase().includes('luces') ? 5 : 4
+  } else {
+    p.warehouseStock = Math.max(0, Number(p.warehouseStock) || 0)
+  }
+})
+
 const store = reactive({
-  products: load('products', demoData.products || []),
+  products: initialProducts,
   clients: load('clients', demoData.clients || []),
   sales: load('sales', demoData.sales || []),
   debts: load('debts', demoData.debts || []),
@@ -77,6 +89,8 @@ const store = reactive({
     const p = {
       ...product,
       id: nextId('product'),
+      stock: Math.max(0, Number(product.stock) || 0),
+      warehouseStock: Math.max(0, Number(product.warehouseStock) || 0),
       totalSold: 0,
       createdAt: new Date().toISOString(),
     }
@@ -89,7 +103,14 @@ const store = reactive({
   updateProduct(id, data) {
     const idx = this.products.findIndex(p => p.id === id)
     if (idx !== -1) {
-      this.products[idx] = { ...this.products[idx], ...data, updatedAt: new Date().toISOString() }
+      const current = this.products[idx]
+      this.products[idx] = {
+        ...current,
+        ...data,
+        stock: Math.max(0, Number(data.stock !== undefined ? data.stock : current.stock) || 0),
+        warehouseStock: Math.max(0, Number(data.warehouseStock !== undefined ? data.warehouseStock : current.warehouseStock) || 0),
+        updatedAt: new Date().toISOString(),
+      }
       this.saveProducts()
       this.notify('Producto actualizado', 'success')
     }
@@ -104,14 +125,63 @@ const store = reactive({
     }
   },
 
+  // Ajustar stock disponible en tienda
   adjustStock(id, delta) {
     const p = this.products.find(p => p.id === id)
     if (p) {
-      const newStock = p.stock + delta
+      const newStock = (Number(p.stock) || 0) + delta
       if (newStock < 0) return false
       p.stock = newStock
       p.updatedAt = new Date().toISOString()
       this.saveProducts()
+      return true
+    }
+    return false
+  },
+
+  // Ajustar stock en bodega
+  adjustWarehouseStock(id, delta) {
+    const p = this.products.find(p => p.id === id)
+    if (p) {
+      const newWarehouse = (Number(p.warehouseStock) || 0) + delta
+      if (newWarehouse < 0) return false
+      p.warehouseStock = newWarehouse
+      p.updatedAt = new Date().toISOString()
+      this.saveProducts()
+      return true
+    }
+    return false
+  },
+
+  // Trasladar stock entre bodega y tienda
+  transferStock(id, from, to, amount = 1) {
+    const p = this.products.find(p => p.id === id)
+    if (!p) return false
+    const qty = Math.max(1, parseInt(amount) || 1)
+    p.stock = Math.max(0, Number(p.stock) || 0)
+    p.warehouseStock = Math.max(0, Number(p.warehouseStock) || 0)
+
+    if (from === 'warehouse' && to === 'store') {
+      if (p.warehouseStock < qty) {
+        this.notify(`No hay suficiente cantidad en bodega (disponible en bodega: ${p.warehouseStock})`, 'warning')
+        return false
+      }
+      p.warehouseStock -= qty
+      p.stock += qty
+      p.updatedAt = new Date().toISOString()
+      this.saveProducts()
+      this.notify(`Se pasaron ${qty} unidad(es) de Bodega a Tienda (${p.name})`, 'success')
+      return true
+    } else if (from === 'store' && to === 'warehouse') {
+      if (p.stock < qty) {
+        this.notify(`No hay suficiente cantidad en tienda (disponible en tienda: ${p.stock})`, 'warning')
+        return false
+      }
+      p.stock -= qty
+      p.warehouseStock += qty
+      p.updatedAt = new Date().toISOString()
+      this.saveProducts()
+      this.notify(`Se pasaron ${qty} unidad(es) de Tienda a Bodega (${p.name})`, 'success')
       return true
     }
     return false
@@ -415,10 +485,14 @@ const store = reactive({
 
   // ============ COMPUTED STATS ============
   get totalProducts() { return this.products.length },
+  get totalStoreStock() { return this.products.reduce((s, p) => s + (Number(p.stock) || 0), 0) },
+  get totalWarehouseStock() { return this.products.reduce((s, p) => s + (Number(p.warehouseStock) || 0), 0) },
+  get totalInventoryUnits() { return this.totalStoreStock + this.totalWarehouseStock },
   get lowStockProducts() {
-    return this.products.filter(p => p.stock > 0 && p.stock <= (p.minStock || this.config.lowStockThreshold))
+    return this.products.filter(p => (Number(p.stock) || 0) > 0 && (Number(p.stock) || 0) <= (p.minStock || this.config.lowStockThreshold))
   },
-  get outOfStockProducts() { return this.products.filter(p => p.stock <= 0) },
+  get outOfStockProducts() { return this.products.filter(p => (Number(p.stock) || 0) <= 0) },
+  get outOfAllStockProducts() { return this.products.filter(p => (Number(p.stock) || 0) <= 0 && (Number(p.warehouseStock) || 0) <= 0) },
   get totalClients() { return this.clients.length },
   get totalPendingDebt() {
     return this.debts.filter(d => d.status !== 'pagada').reduce((s, d) => s + d.balance, 0)
@@ -453,6 +527,7 @@ const store = reactive({
   resetAllDataToZero() {
     this.products.forEach(p => {
       p.stock = 0
+      p.warehouseStock = 0
       p.totalSold = 0
     })
     this.clients.forEach(c => {
@@ -476,10 +551,12 @@ const store = reactive({
 })
 
 // Ensure demo products have stock if all products are 0
-if (store.products.length > 0 && store.products.every(p => p.stock === 0)) {
-  const defaultStocks = [12, 10, 15, 8, 5, 20, 7, 14]
+if (store.products.length > 0 && store.products.every(p => p.stock === 0 && (p.warehouseStock || 0) === 0)) {
+  const defaultStocks = [12, 10, 15, 3, 5, 20, 7, 14]
+  const defaultWarehouse = [8, 6, 10, 5, 4, 15, 5, 10]
   store.products.forEach((p, i) => {
     p.stock = defaultStocks[i % defaultStocks.length]
+    p.warehouseStock = defaultWarehouse[i % defaultWarehouse.length]
   })
   store.saveProducts()
 }

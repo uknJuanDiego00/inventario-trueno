@@ -106,22 +106,24 @@
             }"
             @click="handleCardClick(product)"
           >
-            <!-- Badge stock status -->
+            <!-- Badge stock status: Tienda & Bodega -->
             <div class="card-top-row">
-              <span
-                class="stock-badge"
-                :class="product.stock <= 0 ? 'stock-empty' : product.stock <= (product.minStock || 5) ? 'stock-low' : 'stock-ok'"
-              >
-                <template v-if="product.stock <= 0">
-                  <AlertCircle :size="12" /> Agotado
-                </template>
-                <template v-else-if="product.stock <= (product.minStock || 5)">
-                  <AlertTriangle :size="12" /> Stock bajo ({{ formatNumber(product.stock) }})
-                </template>
-                <template v-else>
-                  <Check :size="12" /> {{ formatNumber(product.stock) }} en stock
-                </template>
-              </span>
+              <div class="card-stock-pill-group">
+                <span
+                  class="stock-badge stock-badge-store"
+                  :class="product.stock <= 0 ? 'stock-empty' : product.stock <= (product.minStock || 5) ? 'stock-low' : 'stock-ok'"
+                  title="Disponibles en tienda para venta"
+                >
+                  <Store :size="10" /> {{ formatNumber(product.stock) }} disp.
+                </span>
+                <span
+                  class="stock-badge stock-badge-bodega"
+                  :class="(product.warehouseStock || 0) <= 0 ? 'bodega-empty' : 'bodega-has'"
+                  title="Unidades en bodega"
+                >
+                  <Warehouse :size="10" /> {{ formatNumber(product.warehouseStock || 0) }} bodega
+                </span>
+              </div>
               <span class="category-tag">{{ product.category }}</span>
             </div>
 
@@ -132,6 +134,14 @@
                 <h4 class="product-name" :title="product.name">{{ product.name }}</h4>
                 <div v-if="product.sku" class="product-sku">Cód: {{ product.sku }}</div>
               </div>
+            </div>
+
+            <!-- Quick Restock button from bodega if 0 in store -->
+            <div v-if="product.stock <= 0 && (product.warehouseStock || 0) > 0" class="card-bodega-restock" @click.stop>
+              <span class="bodega-restock-text">Sin tienda ({{ product.warehouseStock }} en bodega)</span>
+              <button class="btn-quick-pass" @click="quickPassToStore(product, 1)" title="Pasar 1 unidad de bodega a tienda">
+                <ArrowUpRight :size="11" /> Pasar 1 a tienda
+              </button>
             </div>
 
             <!-- Precio y Acción -->
@@ -228,7 +238,14 @@
                 class="ticket-item"
               >
                 <div class="item-header">
-                  <span class="item-name">{{ item.name }}</span>
+                  <div class="item-header-info">
+                    <span class="item-name">{{ item.name }}</span>
+                    <div class="item-stock-loc-text">
+                      <span class="text-success"><Store :size="10" /> {{ getProductStock(item.productId) }} disp.</span>
+                      <span class="loc-sep">•</span>
+                      <span class="text-accent"><Warehouse :size="10" /> {{ getProductWarehouse(item.productId) }} bodega</span>
+                    </div>
+                  </div>
                   <button
                     class="item-delete-btn"
                     @click="removeFromCart(index)"
@@ -272,7 +289,19 @@
                   v-if="item.qty >= getItemMaxStock(item.productId)"
                   class="stock-warning-note"
                 >
-                  <AlertTriangle :size="13" /> Máximo stock en bodega alcanzado ({{ getItemMaxStock(item.productId) }} uds.)
+                  <div class="stock-warn-left">
+                    <AlertTriangle :size="13" />
+                    <span>Máximo disponible en tienda alcanzado ({{ getItemMaxStock(item.productId) }} disp.)</span>
+                  </div>
+                  <button
+                    v-if="getProductWarehouse(item.productId) > 0"
+                    type="button"
+                    class="btn-inline-transfer"
+                    @click="transferAndAdd(item.productId)"
+                    title="Pasar 1 unidad de bodega a tienda y sumarla al carrito"
+                  >
+                    <ArrowUpRight :size="11" /> Pasar 1 de bodega (+1)
+                  </button>
                 </div>
               </div>
             </div>
@@ -682,7 +711,8 @@ import {
   ShoppingCart, Package, Search, X, CheckCircle2, AlertTriangle,
   AlertCircle, Check, Plus, Minus, Receipt, User, UserPlus,
   ArrowRight, ArrowLeft, RotateCcw, ClipboardList, Banknote,
-  Smartphone, Building2, CreditCard, Clock, Percent
+  Smartphone, Building2, CreditCard, Clock, Percent,
+  Store, Warehouse, ArrowUpRight, ArrowLeftRight
 } from '@lucide/vue'
 
 // ================= ESTADOS =================
@@ -870,14 +900,48 @@ function getCartItemQty(productId) {
   return item ? item.qty : 0
 }
 
+function getProductStock(productId) {
+  const product = store.getProductById(productId)
+  return product ? (Number(product.stock) || 0) : 0
+}
+
+function getProductWarehouse(productId) {
+  const product = store.getProductById(productId)
+  return product ? (Number(product.warehouseStock) || 0) : 0
+}
+
 function getItemMaxStock(productId) {
   const product = store.getProductById(productId)
-  return product ? product.stock : 0
+  return product ? (Number(product.stock) || 0) : 0
+}
+
+function quickPassToStore(product, qty = 1) {
+  store.transferStock(product.id, 'warehouse', 'store', qty)
+}
+
+function transferAndAdd(productId) {
+  const product = store.getProductById(productId)
+  if (!product) return
+  if ((Number(product.warehouseStock) || 0) <= 0) {
+    store.notify('No hay unidades en bodega para trasladar', 'warning')
+    return
+  }
+  if (store.transferStock(productId, 'warehouse', 'store', 1)) {
+    const item = cart.value.find(i => i.productId === productId)
+    if (item) {
+      item.qty++
+      item.subtotal = item.qty * item.price
+    }
+  }
 }
 
 function handleCardClick(product) {
   if (product.stock <= 0) {
-    store.notify(`"${product.name}" está agotado en inventario`, 'warning')
+    if ((product.warehouseStock || 0) > 0) {
+      store.notify(`"${product.name}" no tiene unidades en tienda, pero hay ${product.warehouseStock} en bodega. Usa el botón "Pasar 1 a tienda" en la tarjeta.`, 'info')
+    } else {
+      store.notify(`"${product.name}" está totalmente agotado`, 'warning')
+    }
     return
   }
   // Si no está en carrito, agregarlo directamente
@@ -888,7 +952,11 @@ function handleCardClick(product) {
 
 function quickAddToCart(product) {
   if (product.stock <= 0) {
-    store.notify(`"${product.name}" no tiene stock disponible`, 'warning')
+    if ((product.warehouseStock || 0) > 0) {
+      store.notify(`"${product.name}" no tiene stock en tienda. Pásalo desde bodega primero con el botón en la tarjeta.`, 'warning')
+    } else {
+      store.notify(`"${product.name}" no tiene stock disponible`, 'warning')
+    }
     return
   }
 
@@ -898,7 +966,7 @@ function quickAddToCart(product) {
       existing.qty++
       existing.subtotal = existing.qty * existing.price
     } else {
-      store.notify(`Solo hay ${product.stock} unidades en inventario`, 'warning')
+      store.notify(`Solo hay ${product.stock} unidades en tienda. Hay ${product.warehouseStock || 0} en bodega.`, 'warning')
     }
   } else {
     cart.value.push({
@@ -1351,27 +1419,82 @@ function resetForNewSale() {
   gap: 6px;
   font-size: 11px;
 }
+.card-stock-pill-group {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  align-items: center;
+}
 .stock-badge {
   font-weight: 600;
-  padding: 3px 8px;
+  padding: 2px 6px;
   border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
 }
-.stock-ok {
-  background: rgba(0, 217, 126, 0.12);
+.stock-badge-store.stock-ok {
+  background: rgba(0, 217, 126, 0.15);
   color: var(--success);
+  border: 1px solid rgba(0, 217, 126, 0.3);
 }
-.stock-low {
-  background: rgba(245, 166, 35, 0.15);
+.stock-badge-store.stock-low {
+  background: rgba(245, 166, 35, 0.18);
   color: var(--warning);
+  border: 1px solid rgba(245, 166, 35, 0.35);
 }
-.stock-empty {
+.stock-badge-store.stock-empty {
   background: rgba(255, 59, 92, 0.15);
   color: var(--danger);
+  border: 1px solid rgba(255, 59, 92, 0.3);
+}
+.stock-badge-bodega.bodega-has {
+  background: rgba(255, 69, 0, 0.15);
+  color: var(--accent);
+  border: 1px solid rgba(255, 69, 0, 0.3);
+}
+.stock-badge-bodega.bodega-empty {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+}
+.card-bodega-restock {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  background: rgba(255, 69, 0, 0.08);
+  border: 1px dashed rgba(255, 69, 0, 0.3);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+}
+.bodega-restock-text {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+.btn-quick-pass {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  transition: opacity 0.15s;
+}
+.btn-quick-pass:hover {
+  opacity: 0.9;
 }
 .category-tag {
   color: var(--text-muted);
   font-size: 11px;
-  max-width: 90px;
+  max-width: 80px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1711,11 +1834,56 @@ function resetForNewSale() {
   font-weight: 700;
   color: var(--success);
 }
+.item-header-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.item-stock-loc-text {
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.loc-sep {
+  color: var(--text-muted);
+  opacity: 0.5;
+}
 .stock-warning-note {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--warning);
   margin-top: 6px;
-  line-height: 1.2;
+  background: rgba(245, 166, 35, 0.08);
+  border: 1px solid rgba(245, 166, 35, 0.25);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.stock-warn-left {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.btn-inline-transfer {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+.btn-inline-transfer:hover {
+  opacity: 0.9;
 }
 
 /* Ticket Footer & Cálculos */

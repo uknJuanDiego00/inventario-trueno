@@ -51,10 +51,20 @@ export function formatDateShort(dateStr) {
 }
 
 export function getStockStatus(product, threshold = 5) {
-  const min = product.minStock || threshold
-  if (product.stock <= 0) return { label: 'Agotado', badge: 'badge-danger' }
-  if (product.stock <= min) return { label: 'Stock bajo', badge: 'badge-warning' }
-  return { label: 'Disponible', badge: 'badge-success' }
+  const min = product?.minStock || threshold
+  const storeStock = Math.max(0, Number(product?.stock) || 0)
+  const warehouseStock = Math.max(0, Number(product?.warehouseStock) || 0)
+
+  if (storeStock <= 0 && warehouseStock <= 0) return { label: 'Agotado', badge: 'badge-danger', dot: '🔴' }
+  if (storeStock <= 0 && warehouseStock > 0) return { label: 'Solo en bodega', badge: 'badge-warning', dot: '📦' }
+  if (storeStock <= min) return { label: 'Stock bajo tienda', badge: 'badge-warning', dot: '⚠️' }
+  return { label: 'Disponible', badge: 'badge-success', dot: '🟢' }
+}
+
+export function formatStockLabel(product) {
+  const storeStock = Math.max(0, Number(product?.stock) || 0)
+  const warehouseStock = Math.max(0, Number(product?.warehouseStock) || 0)
+  return `${storeStock} disponibles, ${warehouseStock} bodega`
 }
 
 export function getDebtStatus(debt) {
