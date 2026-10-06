@@ -17,7 +17,7 @@ function load(key, fallback) {
 }
 
 // ---- ID Generator ----
-let _idCounters = load('id_counters', { product: 100, client: 100, sale: 1000, debt: 100, payment: 100 })
+let _idCounters = load('id_counters', { product: 100, client: 100, sale: 1000, debt: 100, payment: 100, pending_sale: 100 })
 function nextId(type) {
   _idCounters[type] = (_idCounters[type] || 100) + 1
   persist('id_counters', _idCounters)
@@ -74,6 +74,7 @@ const store = reactive({
   clients: load('clients', demoData.clients || []),
   sales: load('sales', demoData.sales || []),
   debts: load('debts', demoData.debts || []),
+  pendingSales: load('pending_sales', []),
 
   config: load('config', {
     storeName: 'Trueno 219',
@@ -384,6 +385,57 @@ const store = reactive({
     persist('sales', this.sales)
   },
 
+  // ============ PENDING SALES ============
+  savePendingSale(saleData) {
+    if (saleData.id) {
+      const idx = this.pendingSales.findIndex(p => p.id === saleData.id)
+      if (idx !== -1) {
+        this.pendingSales[idx] = {
+          ...this.pendingSales[idx],
+          ...saleData,
+          status: 'PENDIENTE',
+          updatedAt: new Date().toISOString(),
+        }
+        this.savePendingSales()
+        this.notify(`Venta pendiente #${saleData.id} actualizada`, 'success')
+        return this.pendingSales[idx]
+      }
+    }
+
+    const pendingNum = nextId('pending_sale')
+    const formattedId = `PEND-${String(pendingNum).padStart(3, '0')}`
+    const pending = {
+      ...saleData,
+      id: formattedId,
+      status: 'PENDIENTE',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+    this.pendingSales.unshift(pending)
+    this.savePendingSales()
+    this.notify(`Venta guardada como pendiente (#${pending.id})`, 'success')
+    return pending
+  },
+
+  deletePendingSale(id) {
+    const idx = this.pendingSales.findIndex(p => p.id === id)
+    if (idx !== -1) {
+      const removed = this.pendingSales.splice(idx, 1)[0]
+      this.savePendingSales()
+      this.notify(`Venta pendiente #${id} eliminada`, 'info')
+      return removed
+    }
+    return null
+  },
+
+  getPendingSaleById(id) {
+    return this.pendingSales.find(p => p.id === id) || null
+  },
+
+  savePendingSales() {
+    persist('pending_sales', this.pendingSales)
+  },
+
   // ============ DEBTS ============
   createDebt({ saleId, clientId, clientName, clientDocument, total, baseTotal, interestRate, interestAmount, paid, items }) {
     const dueDate = new Date()
@@ -535,11 +587,13 @@ const store = reactive({
     })
     this.sales.splice(0)
     this.debts.splice(0)
+    this.pendingSales.splice(0)
 
     this.saveProducts()
     this.saveClients()
     this.saveSales()
     this.saveDebts()
+    this.savePendingSales()
     localStorage.setItem('trueno_initialized', '1')
   },
   getClientSales(clientId) {

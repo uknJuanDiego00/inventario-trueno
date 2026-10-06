@@ -6,10 +6,26 @@
         <h1 class="page-title"><ShoppingCart :size="24" /> Nueva Venta</h1>
         <p class="page-subtitle">Modo Propietario — Selecciona productos en stock y cobra al instante</p>
       </div>
-      <!-- Quick badges on header for desktop -->
-      <div v-if="cart.length > 0" class="header-cart-summary desktop-only">
-        <span class="badge badge-accent">{{ totalUnits }} uds.</span>
-        <span class="header-total">{{ formatCurrency(cartTotal) }}</span>
+      <!-- Quick badges and Pending sales button on header for desktop -->
+      <div class="header-right-actions">
+        <button
+          type="button"
+          class="btn-pending-sales-trigger"
+          :class="{ 'has-pending': store.pendingSales.length > 0 }"
+          @click="showPendingModal = true"
+          title="Ver ventas pendientes"
+        >
+          <Clock :size="17" />
+          <span>Ventas pendientes</span>
+          <span class="pending-count-pill" v-if="store.pendingSales.length > 0">
+            {{ store.pendingSales.length }}
+          </span>
+        </button>
+
+        <div v-if="cart.length > 0" class="header-cart-summary desktop-only">
+          <span class="badge badge-accent">{{ totalUnits }} uds.</span>
+          <span class="header-total">{{ formatCurrency(cartTotal) }}</span>
+        </div>
       </div>
     </div>
 
@@ -30,6 +46,14 @@
         <ShoppingCart :size="16" /> Carrito
         <span v-if="cart.length" class="tab-badge">{{ totalUnits }}</span>
         <span v-if="cart.length" class="tab-total">{{ formatCurrency(cartTotal) }}</span>
+      </button>
+      <button
+        class="tab-btn pending-mobile-tab"
+        :class="{ 'has-pending': store.pendingSales.length > 0 }"
+        @click="showPendingModal = true"
+      >
+        <Clock :size="16" /> Pendientes
+        <span v-if="store.pendingSales.length" class="tab-badge tab-badge-warning">{{ store.pendingSales.length }}</span>
       </button>
     </div>
 
@@ -212,6 +236,25 @@
             >
               <ArrowLeft :size="15" /> Volver al catálogo para agregar más
             </button>
+
+            <!-- Banner si estamos continuando una venta pendiente -->
+            <div v-if="activePendingSaleId" class="active-pending-banner">
+              <div class="apb-content">
+                <Clock :size="15" class="text-warning" />
+                <div class="apb-text">
+                  <span class="apb-title">Continuando Venta <strong>#{{ activePendingSaleId }}</strong></span>
+                  <span class="apb-sub">Estado: PENDIENTE</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                class="btn-apb-new"
+                @click="promptNewSale"
+                title="Dejar esta venta y comenzar otra nueva"
+              >
+                <Plus :size="12" /> Nueva venta
+              </button>
+            </div>
           </div>
 
           <!-- Ticket Body: Items / Suma de productos -->
@@ -530,6 +573,24 @@
               </div>
             </div>
 
+            <!-- Botón Guardar como pendiente -->
+            <button
+              type="button"
+              class="btn-save-pending"
+              :disabled="cart.length === 0"
+              @click="saveAsPending"
+            >
+              <span class="bsp-icon"><Clock :size="20" /></span>
+              <div class="bsp-text-col">
+                <span class="bsp-main-text">
+                  {{ activePendingSaleId ? 'Actualizar venta pendiente' : 'Guardar como pendiente' }}
+                </span>
+                <span class="bsp-sub-text">
+                  Pausa la venta sin descontar inventario • Atiende a otro cliente
+                </span>
+              </div>
+            </button>
+
             <!-- Botón Finalizar / Confirmar Venta -->
             <button
               class="btn-confirm-sale"
@@ -700,11 +761,116 @@
         </div>
       </div>
     </div>
+
+    <!-- ================= MODAL VENTAS PENDIENTES ================= -->
+    <div v-if="showPendingModal" class="modal-overlay" @click.self="showPendingModal = false">
+      <div class="modal pending-sales-modal">
+        <div class="modal-header">
+          <div class="pending-modal-title">
+            <Clock :size="22" class="text-warning" />
+            <h3 class="modal-title">Ventas Pendientes</h3>
+            <span class="badge badge-warning">{{ store.pendingSales.length }}</span>
+          </div>
+          <button class="modal-close" @click="showPendingModal = false"><X :size="18" /></button>
+        </div>
+
+        <div class="modal-body pending-modal-body">
+          <div v-if="store.pendingSales.length === 0" class="empty-pending-state">
+            <div class="empty-pending-icon"><Clock :size="48" /></div>
+            <h4>No hay ventas pendientes</h4>
+            <p class="text-secondary">
+              Cuando comiences una venta y el cliente todavía no se decida, presiona
+              <strong class="text-warning">"Guardar como pendiente"</strong> en el ticket para pausar la venta sin descontar inventario y poder atender a otros clientes.
+            </p>
+          </div>
+
+          <div v-else class="pending-sales-list">
+            <div
+              v-for="pSale in store.pendingSales"
+              :key="pSale.id"
+              class="pending-sale-card"
+              :class="{ 'is-active-sale': activePendingSaleId === pSale.id }"
+            >
+              <div class="psc-top-row">
+                <div class="psc-id-group">
+                  <span class="psc-id-badge">#{{ pSale.id }}</span>
+                  <span class="badge badge-warning psc-status-pill">PENDIENTE</span>
+                  <span v-if="activePendingSaleId === pSale.id" class="badge badge-accent psc-active-pill">En pantalla</span>
+                </div>
+                <span class="psc-time"><Clock :size="12" /> {{ formatDate(pSale.createdAt || pSale.updatedAt) }}</span>
+              </div>
+
+              <div class="psc-client-info">
+                <User :size="15" class="text-secondary" />
+                <span v-if="pSale.clientName" class="psc-client-name">
+                  <strong>{{ pSale.clientName }}</strong>
+                  <span v-if="pSale.clientDocument" class="psc-client-doc"> — CC/NIT: {{ pSale.clientDocument }}</span>
+                </span>
+                <span v-else class="text-muted psc-no-client">Sin cliente todavía</span>
+              </div>
+
+              <!-- Lista de productos -->
+              <div class="psc-items-box">
+                <div class="psc-items-count">
+                  <Package :size="13" />
+                  <span>{{ pSale.items ? pSale.items.reduce((s, i) => s + i.qty, 0) : 0 }} artículos en total:</span>
+                </div>
+                <div class="psc-items-chips">
+                  <span
+                    v-for="(item, idx) in pSale.items"
+                    :key="idx"
+                    class="psc-chip"
+                  >
+                    {{ item.name }} <strong class="text-accent">×{{ item.qty }}</strong>
+                  </span>
+                </div>
+              </div>
+
+              <!-- Resumen financiero -->
+              <div class="psc-summary-row">
+                <div class="psc-breakdown">
+                  <span v-if="pSale.discount > 0" class="psc-sub-item text-success">Desc: -{{ formatCurrency(pSale.discount) }}</span>
+                  <span v-if="pSale.laborCost > 0" class="psc-sub-item text-info">Mano de obra: +{{ formatCurrency(pSale.laborCost) }}</span>
+                </div>
+                <div class="psc-total-group">
+                  <span class="psc-total-label">Total:</span>
+                  <span class="psc-total-amount">{{ formatCurrency(pSale.total) }}</span>
+                </div>
+              </div>
+
+              <!-- Acciones: Continuar o Cancelar -->
+              <div class="psc-actions-row">
+                <button
+                  type="button"
+                  class="btn btn-secondary btn-sm btn-psc-cancel"
+                  @click="confirmCancelPending(pSale)"
+                  title="Cancelar y eliminar esta venta pendiente"
+                >
+                  <Trash2 :size="14" /> Cancelar venta
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-primary btn-sm btn-psc-continue"
+                  @click="continuePendingSale(pSale)"
+                  title="Cargar esta venta al carrito para continuarla"
+                >
+                  <Play :size="14" /> Continuar venta
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn btn-secondary" @click="showPendingModal = false">Cerrar</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import store from '../stores/store.js'
 import { formatCurrency, formatDate, formatNumber } from '../utils/calculations.js'
 import {
@@ -712,7 +878,7 @@ import {
   AlertCircle, Check, Plus, Minus, Receipt, User, UserPlus,
   ArrowRight, ArrowLeft, RotateCcw, ClipboardList, Banknote,
   Smartphone, Building2, CreditCard, Clock, Percent,
-  Store, Warehouse, ArrowUpRight, ArrowLeftRight
+  Store, Warehouse, ArrowUpRight, ArrowLeftRight, Trash2, Play
 } from '@lucide/vue'
 
 // ================= ESTADOS =================
@@ -728,6 +894,8 @@ const selectedPaymentMethod = ref('Efectivo')
 const cashReceived = ref(null)
 const creditAdvance = ref(0)
 const interestRate = ref(0)
+const showPendingModal = ref(false)
+const activePendingSaleId = ref(null)
 
 // Cliente search
 const clientSearchQuery = ref('')
@@ -1049,6 +1217,8 @@ function clearCart() {
   laborCost.value = 0
   cashReceived.value = null
   creditAdvance.value = 0
+  activePendingSaleId.value = null
+  clearActiveDraft()
 }
 
 function selectPayment(methodId) {
@@ -1059,6 +1229,189 @@ function selectPayment(methodId) {
     creditAdvance.value = 0
   }
 }
+
+// ================= VENTAS PENDIENTES =================
+function saveAsPending() {
+  if (cart.value.length === 0) {
+    store.notify('Agrega al menos un producto al carrito para guardarla como pendiente', 'warning')
+    return
+  }
+
+  const client = selectedClientId.value ? store.getClientById(Number(selectedClientId.value)) : null
+
+  const pendingData = {
+    id: activePendingSaleId.value || undefined,
+    items: cart.value.map(i => ({
+      productId: i.productId,
+      name: i.name,
+      price: i.price,
+      qty: i.qty,
+      subtotal: i.subtotal,
+    })),
+    clientId: client ? client.id : (selectedClientId.value ? Number(selectedClientId.value) : null),
+    clientName: client ? client.name : (selectedClientId.value ? 'Cliente' : ''),
+    clientDocument: client ? client.document : '',
+    discount: Number(discountAmount.value) || 0,
+    laborCost: Number(laborCost.value) || 0,
+    subtotal: cartSubtotal.value,
+    total: cartTotal.value,
+    paymentMethod: selectedPaymentMethod.value,
+    interestRate: Number(interestRate.value) || 0,
+    creditAdvance: Number(creditAdvance.value) || 0,
+    cashReceived: cashReceived.value,
+    status: 'PENDIENTE',
+  }
+
+  const saved = store.savePendingSale(pendingData)
+
+  // Dejar libre el módulo de venta inmediatamente para poder atender a otro cliente
+  resetSaleForm()
+  activePendingSaleId.value = null
+  store.notify(`Venta guardada como pendiente (#${saved.id}). Módulo libre para una nueva venta.`, 'success')
+}
+
+function continuePendingSale(sale) {
+  if (cart.value.length > 0 && activePendingSaleId.value !== sale.id) {
+    const ok = window.confirm('Tienes productos en el carrito actual. ¿Deseas descartarlos y abrir esta venta pendiente?')
+    if (!ok) return
+  }
+
+  activePendingSaleId.value = sale.id
+  cart.value = (sale.items || []).map(i => ({
+    productId: i.productId,
+    name: i.name,
+    price: Number(i.price) || 0,
+    qty: Number(i.qty) || 1,
+    subtotal: (Number(i.price) || 0) * (Number(i.qty) || 1),
+  }))
+  discountAmount.value = Number(sale.discount) || 0
+  laborCost.value = Number(sale.laborCost) || 0
+  selectedPaymentMethod.value = sale.paymentMethod || 'Efectivo'
+  interestRate.value = Number(sale.interestRate) || 0
+  creditAdvance.value = Number(sale.creditAdvance) || 0
+  cashReceived.value = sale.cashReceived !== undefined ? sale.cashReceived : null
+
+  if (sale.clientId) {
+    selectedClientId.value = sale.clientId
+    const c = store.getClientById(Number(sale.clientId))
+    if (c) {
+      clientSearchQuery.value = `${c.document} — ${c.name}`
+    } else if (sale.clientName) {
+      clientSearchQuery.value = sale.clientDocument ? `${sale.clientDocument} — ${sale.clientName}` : sale.clientName
+    }
+  } else {
+    selectedClientId.value = ''
+    clientSearchQuery.value = ''
+  }
+
+  showPendingModal.value = false
+  mobileTab.value = 'cart'
+  store.notify(`Venta pendiente #${sale.id} cargada. Puedes agregar más productos o confirmarla.`, 'info')
+}
+
+function confirmCancelPending(sale) {
+  const ok = window.confirm(`¿Estás seguro de cancelar la venta pendiente #${sale.id}? Esta acción no se puede deshacer y no modificará el inventario.`)
+  if (!ok) return
+
+  store.deletePendingSale(sale.id)
+  if (activePendingSaleId.value === sale.id) {
+    resetSaleForm()
+    activePendingSaleId.value = null
+  }
+}
+
+function promptNewSale() {
+  if (cart.value.length > 0) {
+    const ok = window.confirm(`¿Deseas iniciar una nueva venta? La venta pendiente #${activePendingSaleId.value} permanecerá guardada.`)
+    if (!ok) return
+  }
+  resetSaleForm()
+  activePendingSaleId.value = null
+  store.notify('Listo para iniciar una nueva venta', 'info')
+}
+
+function resetSaleForm() {
+  cart.value = []
+  discountAmount.value = 0
+  laborCost.value = 0
+  selectedClientId.value = ''
+  clientSearchQuery.value = ''
+  clientDropdownOpen.value = false
+  selectedPaymentMethod.value = 'Efectivo'
+  cashReceived.value = null
+  creditAdvance.value = 0
+  interestRate.value = 0
+  activePendingSaleId.value = null
+  clearActiveDraft()
+}
+
+// ================= PERSISTENCIA LOCAL DEL BORRADOR ACTIVO =================
+const DRAFT_KEY = 'trueno_active_pos_draft'
+let isRestoring = false
+
+function saveActiveDraft() {
+  if (isRestoring) return
+  if (cart.value.length === 0 && !selectedClientId.value && !activePendingSaleId.value) {
+    clearActiveDraft()
+    return
+  }
+  try {
+    const draft = {
+      cart: cart.value,
+      discountAmount: discountAmount.value,
+      laborCost: laborCost.value,
+      selectedClientId: selectedClientId.value,
+      clientSearchQuery: clientSearchQuery.value,
+      selectedPaymentMethod: selectedPaymentMethod.value,
+      cashReceived: cashReceived.value,
+      creditAdvance: creditAdvance.value,
+      interestRate: interestRate.value,
+      activePendingSaleId: activePendingSaleId.value,
+    }
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
+  } catch {}
+}
+
+function clearActiveDraft() {
+  try {
+    localStorage.removeItem(DRAFT_KEY)
+  } catch {}
+}
+
+function restoreActiveDraft() {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY)
+    if (!raw) return
+    isRestoring = true
+    const draft = JSON.parse(raw)
+    if (draft.cart && Array.isArray(draft.cart)) cart.value = draft.cart
+    if (draft.discountAmount !== undefined) discountAmount.value = draft.discountAmount
+    if (draft.laborCost !== undefined) laborCost.value = draft.laborCost
+    if (draft.selectedClientId) selectedClientId.value = draft.selectedClientId
+    if (draft.clientSearchQuery) clientSearchQuery.value = draft.clientSearchQuery
+    if (draft.selectedPaymentMethod) selectedPaymentMethod.value = draft.selectedPaymentMethod
+    if (draft.cashReceived !== undefined) cashReceived.value = draft.cashReceived
+    if (draft.creditAdvance !== undefined) creditAdvance.value = draft.creditAdvance
+    if (draft.interestRate !== undefined) interestRate.value = draft.interestRate
+    if (draft.activePendingSaleId) activePendingSaleId.value = draft.activePendingSaleId
+  } catch (e) {
+    console.error('Error al restaurar borrador', e)
+  } finally {
+    isRestoring = false
+  }
+}
+
+watch(
+  [cart, discountAmount, laborCost, selectedClientId, clientSearchQuery, selectedPaymentMethod, cashReceived, creditAdvance, interestRate, activePendingSaleId],
+  () => {
+    saveActiveDraft()
+  },
+  { deep: true }
+)
+
+onMounted(() => {
+  restoreActiveDraft()
+})
 
 // ================= REGISTRO RÁPIDO DE CLIENTE =================
 function saveQuickClient() {
@@ -1138,6 +1491,11 @@ function submitSale() {
 
   const registeredSale = store.registerSale(saleData)
   if (registeredSale) {
+    if (activePendingSaleId.value) {
+      store.deletePendingSale(activePendingSaleId.value)
+      activePendingSaleId.value = null
+    }
+    clearActiveDraft()
     const isAccumulated = !registeredSale.__isNew && registeredSale.items.length > cart.value.length
     completedSale.value = {
       ...registeredSale,
@@ -1151,14 +1509,7 @@ function submitSale() {
 function resetForNewSale() {
   saleSuccessModal.value = false
   completedSale.value = null
-  clearCart()
-  selectedClientId.value = ''
-  clientSearchQuery.value = ''
-  clientDropdownOpen.value = false
-  selectedPaymentMethod.value = 'Efectivo'
-  cashReceived.value = null
-  creditAdvance.value = 0
-  interestRate.value = 0
+  resetSaleForm()
   mobileTab.value = 'catalog'
 }
 </script>
@@ -2692,5 +3043,361 @@ function resetForNewSale() {
   .grand-total-value {
     font-size: 20px;
   }
+}
+
+/* ================= ESTILOS VENTAS PENDIENTES ================= */
+.header-right-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.btn-pending-sales-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  padding: 8px 14px;
+  border-radius: var(--radius-xl);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.btn-pending-sales-trigger:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+  border-color: var(--warning);
+}
+
+.btn-pending-sales-trigger.has-pending {
+  background: rgba(245, 166, 35, 0.12);
+  border-color: rgba(245, 166, 35, 0.4);
+  color: var(--warning);
+}
+
+.pending-count-pill {
+  background: var(--warning);
+  color: #0b0c10;
+  font-weight: 800;
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 10px;
+}
+
+.tab-badge-warning {
+  background: var(--warning) !important;
+  color: #0b0c10 !important;
+}
+
+.active-pending-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: rgba(245, 166, 35, 0.1);
+  border: 1px solid rgba(245, 166, 35, 0.35);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  margin-top: 10px;
+}
+
+.apb-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.apb-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.apb-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--warning);
+}
+
+.apb-sub {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.btn-apb-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+  white-space: nowrap;
+}
+
+.btn-apb-new:hover {
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Botón Guardar como pendiente en ticket */
+.btn-save-pending {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: rgba(245, 166, 35, 0.12);
+  border: 1px dashed rgba(245, 166, 35, 0.5);
+  color: var(--warning);
+  padding: 12px 16px;
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: var(--transition);
+  margin-bottom: 12px;
+}
+
+.btn-save-pending:hover:not(:disabled) {
+  background: rgba(245, 166, 35, 0.22);
+  border-color: var(--warning);
+  transform: translateY(-1px);
+}
+
+.btn-save-pending:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-color: var(--border-color);
+  color: var(--text-muted);
+  background: var(--bg-card);
+}
+
+.bsp-text-col {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+
+.bsp-main-text {
+  font-family: var(--font-brand);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.bsp-sub-text {
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+/* Modal Ventas Pendientes */
+.pending-sales-modal {
+  max-width: 680px;
+  width: 95%;
+}
+
+.pending-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pending-modal-body {
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.empty-pending-state {
+  text-align: center;
+  padding: 40px 20px;
+}
+
+.empty-pending-icon {
+  margin-bottom: 16px;
+  color: var(--text-muted);
+}
+
+.pending-sales-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.pending-sale-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: var(--transition);
+}
+
+.pending-sale-card:hover {
+  border-color: rgba(245, 166, 35, 0.4);
+}
+
+.pending-sale-card.is-active-sale {
+  border-color: var(--warning);
+  box-shadow: 0 0 12px rgba(245, 166, 35, 0.15);
+}
+
+.psc-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.psc-id-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.psc-id-badge {
+  font-family: var(--font-brand);
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--accent);
+}
+
+.psc-status-pill {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.psc-active-pill {
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.psc-time {
+  font-size: 12px;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.psc-client-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.psc-client-name {
+  color: var(--text-primary);
+}
+
+.psc-client-doc {
+  font-size: 12px;
+}
+
+.psc-no-client {
+  font-size: 12px;
+  font-style: italic;
+}
+
+.psc-items-box {
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+
+.psc-items-count {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.psc-items-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.psc-chip {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: var(--text-primary);
+}
+
+.psc-summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 1px solid var(--border-color);
+  padding-top: 8px;
+}
+
+.psc-breakdown {
+  display: flex;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.psc-total-group {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.psc-total-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.psc-total-amount {
+  font-family: var(--font-brand);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--success);
+}
+
+.psc-actions-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.btn-psc-cancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--danger) !important;
+}
+
+.btn-psc-cancel:hover {
+  background: var(--danger-bg) !important;
+  border-color: var(--danger) !important;
+}
+
+.btn-psc-continue {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
 }
 </style>
