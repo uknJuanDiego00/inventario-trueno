@@ -35,21 +35,53 @@
     <div class="filter-row">
       <div class="search-bar">
         <Search :size="16" class="search-icon" />
-        <input v-model="searchQuery" placeholder="Buscar por cliente o ID..." />
+        <input
+          v-model="searchQuery"
+          placeholder="Buscar por cédula o nombre de deudor..."
+          aria-label="Buscar deudores por cédula o nombre"
+        />
+        <span v-if="detectedSearchBadge" class="search-type-badge">
+          {{ detectedSearchBadge }}
+        </span>
+        <button
+          v-if="searchQuery"
+          type="button"
+          class="search-clear-btn"
+          @click="searchQuery = ''"
+          title="Limpiar búsqueda"
+        >
+          <X :size="14" />
+        </button>
       </div>
       <select class="form-control filter-select" v-model="filterStatus">
         <option value="">Todos los estados</option>
-        <option value="pendiente">Pendiente</option>
-        <option value="vencida">Con Vencidas</option>
-        <option value="pagada">Saldados</option>
+        <option value="pendiente">Activas (Pendientes)</option>
+        <option value="vencida">Activas (Vencidas)</option>
+        <option value="pagada">Pagadas (Saldadas)</option>
       </select>
     </div>
 
     <!-- Debts List agrupado por cliente -->
     <div v-if="filteredGroups.length === 0" class="card">
       <div class="empty-state">
-        <div class="empty-state-icon"><Wallet :size="40" /></div>
-        <div class="empty-state-text">No hay deudas registradas</div>
+        <div class="empty-state-icon">
+          <Search :size="40" v-if="searchQuery.trim()" />
+          <Wallet :size="40" v-else />
+        </div>
+        <div class="empty-state-text">
+          <template v-if="searchQuery.trim()">
+            No se encontraron deudas para la {{ isNumericSearch ? 'cédula' : 'persona' }} "{{ searchQuery.trim() }}"
+          </template>
+          <template v-else-if="filterStatus">
+            No hay deudas con el estado seleccionado
+          </template>
+          <template v-else>
+            No hay deudas registradas
+          </template>
+        </div>
+        <p v-if="searchQuery.trim()" class="text-muted empty-state-subtext">
+          {{ isNumericSearch ? 'Verifica que el número de cédula esté escrito correctamente y que el cliente tenga créditos registrados.' : 'Verifica que el nombre o apellido esté escrito correctamente y que el cliente tenga créditos registrados.' }}
+        </p>
       </div>
     </div>
 
@@ -61,10 +93,12 @@
             <div>
               <div class="debt-client-name">
                 {{ group.clientName }}
-                <span v-if="group.clientId" class="client-id-tag">ID: {{ group.clientId }}</span>
+                <span v-if="group.clientDocument" class="client-id-tag">C.C. {{ group.clientDocument }}</span>
+                <span v-if="group.clientId" class="client-id-tag" style="opacity:0.75">ID: {{ group.clientId }}</span>
               </div>
               <div class="text-muted debt-meta">
                 {{ group.debts.length }} venta{{ group.debts.length === 1 ? '' : 's' }} a crédito
+                <span v-if="group.clientPhone"> · Tel: {{ group.clientPhone }}</span>
               </div>
             </div>
           </div>
@@ -117,7 +151,7 @@
             <div v-for="debt in sortedGroupDebts(group)" :key="debt.id" class="client-sale-item">
               <div class="csi-header">
                 <span class="csi-sale-id">Venta #{{ debt.saleId }} — {{ formatDateShort(debt.createdAt) }}</span>
-                <span :class="['badge', getDebtStatus(debt).badge]">{{ getDebtStatus(debt).label }}</span>
+                <span :class="['badge', getDebtDisplayStatus(debt).badge]">{{ getDebtDisplayStatus(debt).label }}</span>
               </div>
               <div v-if="debt.updatedAt" class="csi-updated">
                 ✏️ Modificado: {{ formatDate(debt.updatedAt) }}
@@ -196,7 +230,8 @@
                 <div class="fw-bold" style="font-size:15px">{{ paymentModal.group?.clientName }}</div>
                 <div class="text-muted" style="font-size:12px">
                   {{ paymentModal.group?.debts?.length }} venta{{ paymentModal.group?.debts?.length === 1 ? '' : 's' }} a crédito
-                  <span v-if="paymentModal.group?.clientId"> · ID: {{ paymentModal.group?.clientId }}</span>
+                  <span v-if="paymentModal.group?.clientDocument"> · C.C. {{ paymentModal.group?.clientDocument }}</span>
+                  <span v-else-if="paymentModal.group?.clientId"> · ID: {{ paymentModal.group?.clientId }}</span>
                 </div>
               </div>
             </div>
@@ -297,6 +332,7 @@ import {
 const searchQuery = ref('')
 const filterStatus = ref('')
 const expandedKeys = ref(new Set())
+const collapsedKeys = ref(new Set())
 
 const paymentModal = reactive({
   open: false,
@@ -306,21 +342,104 @@ const paymentModal = reactive({
   amountError: '',
 })
 
-// ================= AGRUPACION POR CLIENTE =================
-// Agrupa todas las ventas a credito bajo el mismo cliente usando su ID/documento.
-// Si no tiene ID, se agrupa por nombre como respaldo.
+// ================= UTILIDADES DE BÚSQUEDA Y NORMALIZACIÓN =================
+// Normaliza texto: elimina tildes/acentos, minúsculas, espacios adicionales al inicio/final y colapsa espacios intermedios
+function normalizeText(str) {
+  if (!str) return ''
+  return String(str)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ')
+}
+
+// Extrae exclusivamente dígitos numéricos (para cédulas y números de documento)
+function extractDigits(str) {
+  if (!str) return ''
+  return String(str).replace(/\D/g, '')
+}
+
+// Resuelve la información completa del cliente vinculada a una deuda
+function resolveClientInfo(debt) {
+  let matchedClient = null
+
+  // 1. Buscar en store.clients por ID numérico de cliente
+  if (debt.clientId) {
+    matchedClient = store.clients?.find(c => Number(c.id) === Number(debt.clientId))
+  }
+
+  // 2. Si no se encontró, buscar por número de documento / cédula exacta o por dígitos
+  if (!matchedClient && debt.clientDocument) {
+    const rawDoc = String(debt.clientDocument).trim()
+    const docDigits = extractDigits(rawDoc)
+    matchedClient = store.clients?.find(c => {
+      const cDoc = String(c.document || '').trim()
+      return cDoc === rawDoc || (docDigits.length > 0 && extractDigits(cDoc) === docDigits)
+    })
+  }
+
+  // 3. Si no se encontró y el nombre no es genérico, intentar por nombre normalizado
+  if (!matchedClient && debt.clientName && debt.clientName.trim() && debt.clientName !== 'Cliente General') {
+    const normDebtName = normalizeText(debt.clientName)
+    matchedClient = store.clients?.find(c => normalizeText(c.name) === normDebtName)
+  }
+
+  const clientId = matchedClient?.id ?? (debt.clientId ? Number(debt.clientId) : null)
+  const clientDocument = String(matchedClient?.document || debt.clientDocument || '').trim()
+  const clientName = matchedClient?.name || debt.clientName || 'Cliente General'
+  const clientPhone = matchedClient?.phone || ''
+
+  return { matchedClient, clientId, clientDocument, clientName, clientPhone }
+}
+
+// ================= DETECCIÓN AUTOMÁTICA (NÚMEROS VS TEXTO) =================
+// Detecta automáticamente si la consulta corresponde a una búsqueda numérica (cédula) o de texto (nombre)
+const isNumericSearch = computed(() => {
+  const q = searchQuery.value.trim()
+  if (!q) return false
+  const digitsOnly = extractDigits(q)
+  const hasLetters = /[a-zA-ZáéíóúÁÉÍÓÚñÑ]/.test(q)
+  // Prefijos típicos de documento: cc, c.c., cedula, nit, etc.
+  const isExplicitDoc = /^(cc|c\.c\.|c\.c|ti|t\.i\.|nit|pas|ce|c\.e\.)\s*[\d\s.\-]+$/i.test(q)
+  return (!hasLetters && digitsOnly.length > 0) || isExplicitDoc
+})
+
+const detectedSearchBadge = computed(() => {
+  const q = searchQuery.value.trim()
+  if (!q) return null
+  return isNumericSearch.value ? 'Cédula' : 'Nombre'
+})
+
+// ================= AGRUPACIÓN POR CLIENTE (EVITA DUPLICADOS) =================
+// Agrupa todas las deudas de la misma persona bajo una sola tarjeta unificada.
+// Prioriza la cédula como identificador único natural, seguido por clientId o nombre.
 const groupedDebts = computed(() => {
   const map = new Map()
 
   for (const d of store.debts) {
-    const clientKey = d.clientId ?? d.clientDocument ?? null
-    const key = clientKey !== null ? `id-${clientKey}` : `name-${d.clientName || 'Sin Cliente'}`
+    const clientInfo = resolveClientInfo(d)
+    const docDigits = extractDigits(clientInfo.clientDocument)
+
+    // Clave de agrupación unificada para evitar registros duplicados
+    let key = ''
+    if (docDigits) {
+      key = `doc-${docDigits}`
+    } else if (clientInfo.clientId) {
+      key = `id-${clientInfo.clientId}`
+    } else if (clientInfo.clientName && clientInfo.clientName !== 'Cliente General') {
+      key = `name-${normalizeText(clientInfo.clientName)}`
+    } else {
+      key = `debt-${d.id}`
+    }
 
     if (!map.has(key)) {
       map.set(key, {
         key,
-        clientId: clientKey,
-        clientName: d.clientName || 'Cliente General',
+        clientId: clientInfo.clientId,
+        clientDocument: clientInfo.clientDocument,
+        clientName: clientInfo.clientName,
+        clientPhone: clientInfo.clientPhone,
         debts: [],
         total: 0,
         paid: 0,
@@ -332,16 +451,32 @@ const groupedDebts = computed(() => {
     }
 
     const group = map.get(key)
-    group.debts.push(d)
-    group.total += Number(d.total) || 0
-    group.paid += Number(d.paid) || 0
-    group.balance += Number(d.balance) || 0
 
-    if (d.status !== 'pagada') {
-      group.allPaid = false
-      if (isOverdue(d)) group.hasOverdue = true
-      if (!group.nearestDueDate || new Date(d.dueDate) < new Date(group.nearestDueDate)) {
-        group.nearestDueDate = d.dueDate
+    // Enriquecer datos del grupo si este registro contiene más información
+    if (!group.clientDocument && clientInfo.clientDocument) {
+      group.clientDocument = clientInfo.clientDocument
+    }
+    if (!group.clientPhone && clientInfo.clientPhone) {
+      group.clientPhone = clientInfo.clientPhone
+    }
+    if (group.clientName === 'Cliente General' && clientInfo.clientName !== 'Cliente General') {
+      group.clientName = clientInfo.clientName
+    }
+
+    // Evitar añadir deudas duplicadas por id
+    if (!group.debts.some(existing => existing.id === d.id)) {
+      group.debts.push(d)
+      group.total += Number(d.total) || 0
+      group.paid += Number(d.paid) || 0
+      group.balance += Number(d.balance) || 0
+
+      const isDebtPaid = d.status === 'pagada' || (Number(d.balance) || 0) <= 0
+      if (!isDebtPaid) {
+        group.allPaid = false
+        if (isOverdue(d)) group.hasOverdue = true
+        if (!group.nearestDueDate || new Date(d.dueDate) < new Date(group.nearestDueDate)) {
+          group.nearestDueDate = d.dueDate
+        }
       }
     }
   }
@@ -355,16 +490,59 @@ const groupedDebts = computed(() => {
 const clientsWithDebtCount = computed(() => groupedDebts.value.filter(g => !g.allPaid).length)
 const overdueGroupsCount = computed(() => groupedDebts.value.filter(g => g.hasOverdue).length)
 
+// ================= FILTRADO POR BÚSQUEDA Y ESTADO =================
 const filteredGroups = computed(() => {
-  const q = searchQuery.value.toLowerCase()
-  return groupedDebts.value.filter(g => {
-    const matchSearch = !q
-      || g.clientName.toLowerCase().includes(q)
-      || (g.clientId && String(g.clientId).toLowerCase().includes(q))
+  const rawQ = searchQuery.value.trim()
+  const isNum = isNumericSearch.value
+  const queryDigits = extractDigits(rawQ)
+  const normQuery = normalizeText(rawQ)
+  const queryTokens = normQuery.split(' ').filter(Boolean)
+
+  return groupedDebts.value.filter(group => {
+    // 1. Filtrado de búsqueda
+    let matchSearch = true
+
+    if (rawQ) {
+      if (isNum) {
+        // Búsqueda por número de cédula / documento
+        const groupDocDigits = extractDigits(group.clientDocument)
+        const matchDocDigits = queryDigits.length > 0 && groupDocDigits.includes(queryDigits)
+        const matchDocNorm = group.clientDocument && normalizeText(group.clientDocument).includes(normQuery)
+        const matchClientId = group.clientId && String(group.clientId) === queryDigits
+
+        // Buscar también en los documentos de las ventas/deudas del grupo
+        const matchDebtsDoc = group.debts.some(d => {
+          const dDigits = extractDigits(d.clientDocument)
+          return queryDigits.length > 0 && dDigits.includes(queryDigits)
+        })
+
+        // Respaldo en caso de números en el nombre
+        const matchNameFallback = normalizeText(group.clientName).includes(normQuery)
+
+        matchSearch = matchDocDigits || matchDocNorm || matchClientId || matchDebtsDoc || matchNameFallback
+      } else {
+        // Búsqueda por nombres y apellidos (completos o parciales, sin importar mayúsculas, minúsculas o tildes)
+        const normName = normalizeText(group.clientName)
+        const normDoc = normalizeText(group.clientDocument)
+
+        // Cada palabra ingresada debe encontrarse en el nombre del deudor (permite buscar "Juan Perez", "perez juan", etc.)
+        const matchesAllTokens = queryTokens.length > 0 && queryTokens.every(token => normName.includes(token))
+        const matchesDoc = normDoc.includes(normQuery)
+        const matchDebtsName = group.debts.some(d => {
+          const dName = normalizeText(d.clientName)
+          return queryTokens.length > 0 && queryTokens.every(token => dName.includes(token))
+        })
+
+        matchSearch = matchesAllTokens || matchesDoc || matchDebtsName
+      }
+    }
+
+    // 2. Filtrado por estado (pendiente, vencida, pagada)
     let matchStatus = true
-    if (filterStatus.value === 'vencida') matchStatus = g.hasOverdue
-    else if (filterStatus.value === 'pendiente') matchStatus = !g.allPaid
-    else if (filterStatus.value === 'pagada') matchStatus = g.allPaid
+    if (filterStatus.value === 'vencida') matchStatus = group.hasOverdue
+    else if (filterStatus.value === 'pendiente') matchStatus = !group.allPaid
+    else if (filterStatus.value === 'pagada') matchStatus = group.allPaid
+
     return matchSearch && matchStatus
   })
 })
@@ -377,10 +555,20 @@ function getGroupProgressPct(group) {
   return Math.min(100, Math.max(0, Math.round((group.paid / group.total) * 100)))
 }
 
+// Estados claros a nivel de grupo: Activa (Pendiente/Con Vencidas) o Pagada (Saldada)
 function getGroupStatus(group) {
-  if (group.allPaid) return { badge: 'badge-success', label: 'Saldada' }
-  if (group.hasOverdue) return { badge: 'badge-danger', label: 'Con Vencidas' }
-  return { badge: 'badge-warning', label: 'Pendiente' }
+  if (group.allPaid) return { badge: 'badge-success', label: 'Pagada (Saldada)' }
+  if (group.hasOverdue) return { badge: 'badge-danger', label: 'Activa (Con Vencidas)' }
+  return { badge: 'badge-warning', label: 'Activa (Pendiente)' }
+}
+
+// Estados claros a nivel de deuda individual: Activa (Pendiente/Vencida) o Pagada
+function getDebtDisplayStatus(debt) {
+  if (!debt) return { label: 'Desconocido', badge: 'badge-secondary' }
+  const isPaid = debt.status === 'pagada' || (Number(debt.balance) || 0) <= 0
+  if (isPaid) return { label: 'Pagada', badge: 'badge-success' }
+  if (isOverdue(debt) || debt.status === 'vencida') return { label: 'Activa (Vencida)', badge: 'badge-danger' }
+  return { label: 'Activa (Pendiente)', badge: 'badge-warning' }
 }
 
 function sortedGroupDebts(group) {
@@ -388,12 +576,24 @@ function sortedGroupDebts(group) {
 }
 
 function toggleExpanded(key) {
+  if (searchQuery.value.trim() && filteredGroups.value.length === 1 && !collapsedKeys.value.has(key) && !expandedKeys.value.has(key)) {
+    collapsedKeys.value.add(key)
+    return
+  }
+  if (collapsedKeys.value.has(key)) {
+    collapsedKeys.value.delete(key)
+  }
   const next = new Set(expandedKeys.value)
   if (next.has(key)) next.delete(key)
   else next.add(key)
   expandedKeys.value = next
 }
+
 function isExpanded(key) {
+  // Al buscar y encontrar un único cliente, auto-expandir sus ventas para ver de inmediato el detalle
+  if (searchQuery.value.trim() && filteredGroups.value.length === 1 && !collapsedKeys.value.has(key)) {
+    return true
+  }
   return expandedKeys.value.has(key)
 }
 
@@ -845,5 +1045,42 @@ function incrementDebtItem(debt, itemIndex) {
   .pm-amounts { grid-template-columns: 1fr; }
   .pm-balance { grid-column: 1; }
   .quick-amounts { gap: 6px; }
+}
+
+.search-type-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-subtle);
+  border: 1px solid rgba(216, 235, 52, 0.3);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.search-clear-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 50%;
+  transition: var(--transition);
+}
+.search-clear-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.empty-state-subtext {
+  font-size: 13px;
+  margin-top: 8px;
+  max-width: 480px;
+  line-height: 1.4;
 }
 </style>
